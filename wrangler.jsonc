@@ -13,5 +13,6 @@
       "bucket_name": "findimageai"
     }
   ],
+  "keep_vars": true,
   "observability": { "enabled": true }
 }
