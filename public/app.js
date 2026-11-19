@@ -1,18 +1,26 @@
 // FindImageAI – logic trang album (chạy trên Cloudflare Worker + R2)
 const $ = s => document.querySelector(s);
-const ICON_DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>';
-const PAGE = 120;          // số ảnh hiển thị mỗi lần cuộn
-const Q_SCALE = 300;       // lượng tử hoá vector khuôn mặt về Int8
-const SAVE_EVERY = 10;     // lưu chỉ mục sau mỗi N ảnh khi tải lên
+const ICON_DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>';
+const ICON_SELFIE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="3"/><path d="M7 18c1-2.5 3-3.5 5-3.5s4 1 5 3.5"/></svg>';
+const PAGE = 120;            // số ảnh hiển thị mỗi lần cuộn
+const Q_SCALE = 300;         // lượng tử hoá vector khuôn mặt về Int8
+const SAVE_EVERY = 10;       // lưu chỉ mục sau mỗi N ảnh khi thêm ảnh
+const CLUSTER_T = 0.46;      // ngưỡng gom 1 khuôn mặt vào nhóm
+const MERGE_T = 0.36;        // ngưỡng gộp 2 nhóm
+const MIN_PHOTOS = 2;        // người xuất hiện ít nhất N ảnh mới hiện ra
+const MAX_PEOPLE = 400;
+const FACES_COLLAPSED = 24;
 
 /* ---------------- state ---------------- */
 const S = {
-  publicUrl:'', pw:null, canEdit:false,
-  info:{}, photos:[], tab:'all', shown:0,
+  publicUrl:'', hasDrive:false, pw:null, canEdit:false,
+  info:{}, photos:[], people:[], tab:'all', shown:0,
   selfie:null, selfieUrl:null, threshold:0.52, matches:new Map(),
-  lbList:[], lbIdx:0, uploading:false, stop:false,
+  person:null, facesAll:false,
+  lbList:[], lbIdx:0, busy:false, stop:false,
 };
 const fileUrl = key => key ? (S.publicUrl ? S.publicUrl + '/' + key : '/api/file/' + key) : '';
+const byTime = (a,b)=>(a.taken||a.at||0)-(b.taken||b.at||0);
 
 /* ---------------- API ---------------- */
 async function api(path, opts={}){
@@ -20,44 +28,44 @@ async function api(path, opts={}){
   if(S.pw) headers.authorization = 'Bearer ' + S.pw;
   const r = await fetch(path, {...opts, headers});
   if(!r.ok){
-    let msg = r.status + '';
+    let msg = 'Lỗi ' + r.status;
     try{ msg = (await r.json()).error || msg; }catch(e){}
     const err = new Error(msg); err.status = r.status; throw err;
   }
   return r;
 }
 async function loadIndex(){
-  const r = await api('/api/index?t=' + Date.now());
-  const d = await r.json();
+  const d = await (await api('/api/index?t=' + Date.now())).json();
   S.info = d.info || {};
+  S.people = d.people || [];
   S.photos = (d.photos || []).map(p => ({...p, _f: (p.f||[]).map(decodeFace)}));
-  S.photos.sort((a,b)=>(a.taken||a.at||0)-(b.taken||b.at||0));
+  S.photos.sort(byTime);
 }
 async function saveIndex(){
-  const out = { v:1, updatedAt: Date.now(), info: S.info,
+  const out = { v:2, updatedAt: Date.now(), info: S.info, people: S.people,
     photos: S.photos.map(({_f, ...rest}) => rest) };
   await api('/api/index', {method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(out)});
 }
 
-/* ---------------- face vector encode ---------------- */
+/* ---------------- vector khuôn mặt ---------------- */
 function encodeFace(desc){
   const q = new Int8Array(128);
   for(let i=0;i<128;i++) q[i] = Math.max(-127, Math.min(127, Math.round(desc[i]*Q_SCALE)));
-  let s=''; const u = new Uint8Array(q.buffer); for(const b of u) s += String.fromCharCode(b);
+  let s=''; for(const b of new Uint8Array(q.buffer)) s += String.fromCharCode(b);
   return btoa(s);
 }
 function decodeFace(b64){
-  const s = atob(b64); const q = new Int8Array(128);
-  for(let i=0;i<128;i++){ const c = s.charCodeAt(i); q[i] = c>127 ? c-256 : c; }
-  const f = new Float32Array(128); for(let i=0;i<128;i++) f[i] = q[i]/Q_SCALE;
+  const s = atob(b64), f = new Float32Array(128);
+  for(let i=0;i<128;i++){ const c = s.charCodeAt(i); f[i] = (c>127 ? c-256 : c)/Q_SCALE; }
   return f;
 }
 function dist(a,b){ let s=0; for(let i=0;i<128;i++){ const d=a[i]-b[i]; s+=d*d; } return Math.sqrt(s); }
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,10);
+const tick = () => new Promise(r=>setTimeout(r,0));
 
 /* ---------------- toast / confirm ---------------- */
 let toastT;
-function toast(msg, ms=3200){ const t=$('#toast'); t.textContent=msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.add('hidden'),ms); }
+function toast(msg, ms=3400){ const t=$('#toast'); t.textContent=msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.add('hidden'),ms); }
 function ask(title, text, yes='Đồng ý'){
   return new Promise(res=>{
     $('#cfTitle').textContent=title; $('#cfText').textContent=text; $('#cfYes').textContent=yes;
@@ -72,7 +80,7 @@ let faceapi=null, modelsP=null;
 function loadModels(onMsg){
   if(!modelsP){
     modelsP=(async()=>{
-      onMsg?.('Đang tải mô hình AI (lần đầu ~12 MB)…');
+      onMsg?.('Đang tải mô hình AI (lần đầu khoảng 12 MB)…');
       faceapi = await import('./face-api.esm.js');
       try{ await faceapi.tf.setBackend('webgl'); }catch(e){}
       await faceapi.tf.ready();
@@ -101,63 +109,112 @@ function toCanvas(src, max){
   c.getContext('2d').drawImage(src,0,0,c.width,c.height);
   return c;
 }
-const canvasBlob=(c,q=.85)=>new Promise(r=>c.toBlob(r,'image/jpeg',q));
+const canvasBlob=(c,q=.85,type='image/jpeg')=>new Promise(r=>c.toBlob(r,type,q));
 async function detectAll(canvas, minConf=0.45){
   const opts=new faceapi.SsdMobilenetv1Options({minConfidence:minConf, maxResults:60});
   return await faceapi.detectAllFaces(canvas,opts).withFaceLandmarks().withFaceDescriptors();
 }
 
-/* ---------------- render ---------------- */
+/* ---------------- hiển thị ---------------- */
+function renderBrand(){
+  const i=S.info||{}, logos=(i.logos||[]).filter(Boolean);
+  const mk=(host,withSep)=>{
+    host.textContent='';
+    logos.forEach((id,k)=>{
+      if(k && withSep){ const s=document.createElement('span'); s.className='sep'; host.appendChild(s); }
+      const img=document.createElement('img'); img.src=fileUrl('l/'+id+'.png'); img.alt=k?'Logo thương hiệu':'Logo công ty'; host.appendChild(img);
+    });
+  };
+  const b=$('#brand');
+  if(logos.length) mk(b,true);
+  else { b.textContent=''; const t=document.createElement('span'); t.className='txt'; t.textContent=i.brand||'ALBUM'; b.appendChild(t); }
+  mk($('#footLogos'),false);
+  $('#footLogos').classList.toggle('hidden',!logos.length);
+  $('#footBrand').textContent = i.brand || i.title || 'Album ảnh';
+}
 function renderInfo(){
   const i=S.info||{};
   $('#title').textContent = i.title || (S.canEdit ? 'Album chưa đặt tên' : 'Album ảnh');
   $('#eyebrow').textContent = i.eyebrow || 'Album ảnh sự kiện';
-  $('#brandName').textContent = i.brand || 'ALBUM';
-  $('#footBrand').textContent = i.brand || 'Album ảnh';
   document.title = (i.title ? i.title+' · ' : '') + 'Album ảnh';
   const setMeta=(id,v)=>{ const el=$(id); el.classList.toggle('hidden',!v); el.querySelector('b').textContent=v||''; };
   setMeta('#mDate', i.date); setMeta('#mPlace', i.place);
-  const cover = i.cover || S.photos[0]?.id;
+  const cover = (i.cover && S.photos.some(p=>p.id===i.cover)) ? i.cover : S.photos[0]?.id;
   $('#hero').classList.toggle('nocover', !cover);
   $('#heroBg').style.backgroundImage = cover ? `url("${fileUrl('p/'+cover+'.jpg')}")` : '';
   $('#mCount b').textContent = S.photos.length.toLocaleString('vi-VN')+' ảnh';
+  renderBrand();
 }
-function currentList(){
-  if(S.tab==='mine' && S.selfie)
-    return S.photos.filter(p=>S.matches.has(p.id)).sort((a,b)=>S.matches.get(a.id)-S.matches.get(b.id));
-  return S.photos;
+function personCounts(){
+  const m=new Map();
+  for(const p of S.photos){ if(!p.g) continue; for(const id of new Set(p.g)) if(id) m.set(id,(m.get(id)||0)+1); }
+  return m;
 }
+function renderPeople(){
+  const counts=personCounts();
+  const list=S.people.filter(x=>(counts.get(x.id)||0)>=1);
+  const sec=$('#people'); sec.classList.toggle('hidden',!list.length);
+  if(!list.length) return;
+  $('#peopleSub').textContent=`AI đã nhận diện sẵn ${list.length} người xuất hiện trong ảnh. Chạm vào khuôn mặt của bạn để xem ảnh của mình.`;
+  const host=$('#faces'); host.textContent=''; host.classList.toggle('all',S.facesAll);
+  const self=document.createElement('button'); self.className='face selfie';
+  self.innerHTML=`<span class="av">${ICON_SELFIE}</span><small>Dùng selfie</small>`; self.onclick=openFace; host.appendChild(self);
+  const show=S.facesAll?list:list.slice(0,FACES_COLLAPSED);
+  for(const x of show){
+    const b=document.createElement('button'); b.className='face'+(S.person===x.id?' on':'');
+    const n=counts.get(x.id)||0; b.setAttribute('aria-label',`Xem ${n} ảnh của người này`);
+    const av=document.createElement('span'); av.className='av';
+    const img=document.createElement('img'); img.loading='lazy'; img.alt=''; img.src=fileUrl(x.av); av.appendChild(img);
+    const sm=document.createElement('small'); sm.textContent=n+' ảnh';
+    b.append(av,sm); b.onclick=()=>pickPerson(x.id); host.appendChild(b);
+  }
+  const tg=$('#peopleToggle'); tg.classList.toggle('hidden',list.length<=FACES_COLLAPSED);
+  tg.textContent=S.facesAll?'Thu gọn':`Xem tất cả ${list.length} người`;
+}
+$('#peopleToggle').onclick=()=>{ S.facesAll=!S.facesAll; renderPeople(); };
+function pickPerson(id){
+  S.person=id; S.selfie=null; S.selfieUrl=null; S.matches.clear(); saveSelfie();
+  showChip(); renderPeople(); setTab('mine'); $('#bar').scrollIntoView({behavior:'smooth'});
+}
+const hasFilter = () => !!(S.person || S.selfie);
+function mineList(){
+  if(S.person) return S.photos.filter(p=>p.g?.includes(S.person));
+  if(S.selfie) return S.photos.filter(p=>S.matches.has(p.id)).sort((a,b)=>S.matches.get(a.id)-S.matches.get(b.id));
+  return [];
+}
+const currentList = () => S.tab==='mine' ? mineList() : S.photos;
 function tile(p, list, idx){
-  const d=document.createElement('div'); d.className='tile';
+  const d=document.createElement('div'); d.className='tile'; d.tabIndex=0; d.setAttribute('role','button'); d.setAttribute('aria-label','Xem ảnh');
   const img=document.createElement('img'); img.loading='lazy'; img.decoding='async'; img.alt='';
   img.src=fileUrl('t/'+p.id+'.jpg');
   if(p.w&&p.h){ img.width=p.w; img.height=p.h; img.style.aspectRatio=p.w+'/'+p.h; }
   d.appendChild(img);
-  if(S.tab==='mine' && S.matches.has(p.id)){
+  if(S.tab==='mine' && !S.person && S.matches.has(p.id)){
     const b=document.createElement('span'); b.className='badge';
     const dd=S.matches.get(p.id); b.textContent= dd<0.40?'Rất giống':dd<0.48?'Giống':'Có thể là bạn';
     d.appendChild(b);
   }
-  const dl=document.createElement('button'); dl.className='dl'; dl.innerHTML=ICON_DL; dl.title='Tải ảnh';
+  const dl=document.createElement('button'); dl.className='dl'; dl.innerHTML=ICON_DL; dl.setAttribute('aria-label','Tải ảnh');
   dl.onclick=e=>{ e.stopPropagation(); downloadOne(p); };
   d.appendChild(dl);
   d.onclick=()=>openLB(list,idx);
+  d.onkeydown=e=>{ if(e.key==='Enter'&&e.target===d) openLB(list,idx); };
   return d;
 }
 function renderGrid(){
-  const list=currentList();
+  const list=currentList(), mine=mineList();
   $('#nAll').textContent=S.photos.length.toLocaleString('vi-VN');
-  $('#nMine').textContent=S.selfie ? S.matches.size : '–';
-  $('#zipBtn').classList.toggle('hidden', !(S.tab==='mine' && S.selfie && S.matches.size));
+  $('#nMine').textContent=hasFilter() ? mine.length : '–';
+  $('#zipBtn').classList.toggle('hidden', !(S.tab==='mine' && mine.length));
   $('#grid').textContent=''; S.shown=0; renderMore();
   const empty=$('#empty');
   if(list.length || $('#loadNote').dataset.loading){ empty.classList.add('hidden'); return; }
   empty.classList.remove('hidden'); empty.textContent='';
   const h=document.createElement('h3'), p=document.createElement('p'); empty.append(h,p);
   const btn=(label,cls,fn)=>{ const b=document.createElement('button'); b.className='btn '+cls; b.textContent=label; b.onclick=fn; empty.appendChild(b); };
-  if(S.tab==='mine' && !S.selfie){ h.textContent='Bạn chưa tìm ảnh'; p.textContent='Tải 1 ảnh selfie để AI lọc ra những ảnh có bạn.'; btn('Tìm ảnh bằng khuôn mặt','primary',openFace); }
+  if(S.tab==='mine' && !hasFilter()){ h.textContent='Bạn chưa chọn khuôn mặt'; p.textContent=S.people.length?'Chạm vào khuôn mặt của bạn ở phía trên, hoặc tải 1 ảnh selfie để AI tìm giúp.':'Tải 1 ảnh selfie để AI lọc ra những ảnh có bạn.'; btn('Tìm ảnh bằng selfie','primary',openFace); }
   else if(S.tab==='mine'){ h.textContent='Chưa tìm thấy ảnh nào có bạn'; p.textContent='Thử một ảnh selfie khác rõ mặt hơn, hoặc nới độ khớp rộng hơn.'; btn('Thử lại','',openFace); }
-  else if(S.canEdit){ h.textContent='Album đang trống'; p.textContent='Tải ảnh sự kiện lên, AI sẽ tự quét khuôn mặt để khách tìm ảnh của mình.'; btn('Tải ảnh lên','primary',openAdmin); }
+  else if(S.canEdit){ h.textContent='Album đang trống'; p.textContent='Thêm ảnh sự kiện, AI sẽ tự quét và gom nhóm khuôn mặt.'; btn('Thêm ảnh','primary',openAdmin); }
   else { h.textContent='Album chưa có ảnh'; p.textContent='Ảnh sự kiện sẽ xuất hiện ở đây khi ban tổ chức tải lên.'; }
 }
 function renderMore(){
@@ -171,23 +228,24 @@ new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)) renderMore(); },
 function renderStats(){
   $('#sPhotos').textContent=S.photos.length.toLocaleString('vi-VN');
   $('#sFaces').textContent=S.photos.reduce((s,p)=>s+(p.f?.length||0),0).toLocaleString('vi-VN');
+  $('#sPeople').textContent=S.people.length.toLocaleString('vi-VN');
   $('#sSize').textContent=(S.photos.reduce((s,p)=>s+(p.bytes||0),0)/1073741824).toFixed(2)+' GB';
 }
-function renderAll(){ renderInfo(); renderGrid(); renderStats(); }
+function renderAll(){ renderInfo(); renderPeople(); renderGrid(); renderStats(); }
 
-/* ---------------- tabs ---------------- */
+/* ---------------- tab ---------------- */
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  if(t.dataset.tab==='mine' && !S.selfie){ openFace(); return; }
+  if(t.dataset.tab==='mine' && !hasFilter() && !S.people.length){ openFace(); return; }
   setTab(t.dataset.tab);
 });
 function setTab(tab){
   S.tab=tab;
-  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.dataset.tab===tab));
+  document.querySelectorAll('.tab').forEach(x=>{ x.classList.toggle('on',x.dataset.tab===tab); x.setAttribute('aria-selected',x.dataset.tab===tab); });
   renderGrid();
 }
 $('#viewAllBtn').onclick=()=>{ setTab('all'); $('#bar').scrollIntoView({behavior:'smooth'}); };
 
-/* ---------------- so khớp ---------------- */
+/* ---------------- so khớp selfie ---------------- */
 function recompute(){
   S.matches.clear(); if(!S.selfie) return;
   for(const p of S.photos){
@@ -211,21 +269,25 @@ function saveSelfie(){
 function restoreSelfie(){
   try{
     const v=JSON.parse(localStorage.getItem('album.selfie')||'null');
-    if(v?.d?.length===128){ S.selfie=Float32Array.from(v.d); S.threshold=v.t||0.52; S.selfieUrl=v.u||null; $('#th').value=S.threshold; showChip(); }
+    if(v?.d?.length===128){ S.selfie=Float32Array.from(v.d); S.threshold=v.t||0.52; S.selfieUrl=v.u||null; $('#th').value=S.threshold; }
   }catch(e){}
 }
-function showChip(){ $('#selfieChip').classList.toggle('hidden',!S.selfie); if(S.selfieUrl) $('#selfieChipImg').src=S.selfieUrl; }
-$('#clearSelfie').onclick=()=>{ S.selfie=null; S.selfieUrl=null; S.matches.clear(); saveSelfie(); showChip(); setTab('all'); };
+function showChip(){
+  const chip=$('#selChip'); chip.classList.toggle('hidden',!hasFilter()); if(!hasFilter()) return;
+  if(S.person){ const x=S.people.find(x=>x.id===S.person); $('#selChipImg').src=x?fileUrl(x.av):''; $('#selChipTxt').textContent='Đang xem ảnh của người này'; }
+  else { $('#selChipImg').src=S.selfieUrl||''; $('#selChipTxt').textContent='Đang lọc theo selfie của bạn'; }
+}
+$('#clearSel').onclick=()=>{ S.person=null; S.selfie=null; S.selfieUrl=null; S.matches.clear(); saveSelfie(); showChip(); renderPeople(); setTab('all'); };
 
-/* ---------------- tìm ảnh bằng khuôn mặt ---------------- */
+/* ---------------- tìm bằng selfie ---------------- */
 function openFace(){
   $('#faceModal').classList.remove('hidden');
   $('#faceStep1').classList.remove('hidden'); $('#faceStep2').classList.add('hidden');
   loadModels().catch(()=>{});
 }
 $('#findBtnTop').onclick=openFace; $('#findBtnHero').onclick=openFace;
-document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('.modal').classList.add('hidden'));
-document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m && m.id!=='confirm' && !(m.id==='adminModal'&&S.uploading)) m.classList.add('hidden'); }));
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{ const m=b.closest('.modal'); if(m.id==='adminModal'&&S.busy){ toast('Đang xử lý ảnh, bấm Dừng trước khi đóng.'); return; } m.classList.add('hidden'); });
+document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m && m.id!=='confirm' && !(m.id==='adminModal'&&S.busy)) m.classList.add('hidden'); }));
 function wireDrop(el,input,handler){
   input.onchange=()=>{ if(input.files.length) handler([...input.files]); input.value=''; };
   el.addEventListener('dragover',e=>{e.preventDefault(); el.classList.add('over');});
@@ -241,6 +303,7 @@ async function runSelfie(file){
   const s2=$('#faceStep2'); s2.classList.remove('hidden','done');
   $('#scanActions').classList.add('hidden'); $('#sliderWrap').classList.add('hidden');
   const msg=$('#scanMsg'); msg.textContent='Đang đọc ảnh…';
+  const say=(main,sub)=>{ msg.textContent=main; if(sub){ const s=document.createElement('small'); s.textContent=sub; msg.appendChild(s); } };
   try{
     const bmp=await fileToBitmap(file);
     $('#selfiePreview').src=toCanvas(bmp,200).toDataURL('image/jpeg',.8);
@@ -250,7 +313,7 @@ async function runSelfie(file){
     const dets=await detectAll(c,0.4);
     if(!dets.length){
       s2.classList.add('done');
-      msg.innerHTML='Không thấy khuôn mặt nào trong ảnh<small>Hãy dùng ảnh chụp thẳng, đủ sáng, mặt chiếm phần lớn khung hình.</small>';
+      say('Không thấy khuôn mặt nào trong ảnh','Hãy dùng ảnh chụp thẳng, đủ sáng, mặt chiếm phần lớn khung hình.');
       $('#scanActions').classList.remove('hidden'); $('#showMine').classList.add('hidden'); return;
     }
     dets.sort((a,b)=>b.detection.box.area-a.detection.box.area);
@@ -258,24 +321,25 @@ async function runSelfie(file){
     const fc=document.createElement('canvas'); fc.width=fc.height=200;
     fc.getContext('2d').drawImage(c,Math.max(0,bx.x-pad),Math.max(0,bx.y-pad),bx.width+pad*2,bx.height+pad*2,0,0,200,200);
     S.selfieUrl=fc.toDataURL('image/jpeg',.8); $('#selfiePreview').src=S.selfieUrl;
-    S.selfie=best.descriptor;
+    S.selfie=best.descriptor; S.person=null;
     msg.textContent='Đang so khớp với '+S.photos.length.toLocaleString('vi-VN')+' ảnh…';
     await new Promise(r=>setTimeout(r,300));
-    recompute(); saveSelfie(); showChip(); s2.classList.add('done');
+    recompute(); saveSelfie(); showChip(); renderPeople(); s2.classList.add('done');
     const n=S.matches.size;
-    msg.innerHTML = n ? `Tìm thấy <span style="color:var(--accent)">${n}</span> ảnh có bạn 🎉<small>${dets.length>1?'Ảnh có nhiều người, AI chọn khuôn mặt lớn nhất. ':''}Kéo thanh bên dưới nếu thấy thiếu hoặc thừa ảnh.</small>`
-                      : 'Chưa tìm thấy ảnh nào khớp<small>Thử nới độ khớp rộng hơn hoặc dùng ảnh selfie khác.</small>';
+    if(n){ msg.textContent='Tìm thấy '; const em=document.createElement('em'); em.textContent=n+' ảnh'; msg.append(em,' có bạn');
+      const s=document.createElement('small'); s.textContent=(dets.length>1?'Ảnh có nhiều người, AI chọn khuôn mặt lớn nhất. ':'')+'Kéo thanh bên dưới nếu thấy thiếu hoặc thừa ảnh.'; msg.appendChild(s); }
+    else say('Chưa tìm thấy ảnh nào khớp','Thử nới độ khớp rộng hơn hoặc dùng ảnh selfie khác.');
     $('#scanActions').classList.remove('hidden'); $('#showMine').classList.toggle('hidden',!n);
     $('#sliderWrap').classList.remove('hidden'); $('#thLabel').textContent=thName(S.threshold); $('#thCount').textContent=n+' ảnh';
     renderGrid();
   }catch(e){
     console.error(e); s2.classList.add('done');
-    msg.innerHTML='Không chạy được AI trên trình duyệt này<small>Hãy thử Chrome/Safari bản mới, hoặc trên máy tính.</small>';
-    $('#scanActions').classList.remove('hidden');
+    say('Không chạy được AI trên trình duyệt này','Hãy thử Chrome hoặc Safari bản mới, hoặc dùng máy tính.');
+    $('#scanActions').classList.remove('hidden'); $('#showMine').classList.add('hidden');
   }
 }
 
-/* ---------------- tải ảnh ---------------- */
+/* ---------------- tải ảnh về ---------------- */
 const fname = p => ((p.name||p.id).replace(/\.[^.]+$/,'').replace(/[^\w\-]+/g,'_').slice(0,80) || p.id) + '.jpg';
 async function fetchPhoto(p){ const r=await fetch('/api/file/p/'+p.id+'.jpg'); if(!r.ok) throw new Error('HTTP '+r.status); return await r.blob(); }
 function saveBlob(blob, name){
@@ -294,8 +358,7 @@ $('#zipBtn').onclick=async()=>{
     const zip=new JSZip(); let i=0;
     for(const p of list){ i++; lbl.textContent=`Đang gom ${i}/${list.length}…`; zip.file(String(i).padStart(3,'0')+'_'+fname(p), await fetchPhoto(p)); }
     lbl.textContent='Đang nén…';
-    const blob=await zip.generateAsync({type:'blob'});
-    saveBlob(blob, ((S.info.title||'album').replace(/[^\w\-]+/g,'_'))+'_anh-cua-toi.zip');
+    saveBlob(await zip.generateAsync({type:'blob'}), ((S.info.title||'album').replace(/[^\w\-]+/g,'_'))+'_anh-cua-toi.zip');
   }catch(e){ toast('Không tạo được file zip: '+e.message); }
   btn.disabled=false; lbl.textContent='Tải tất cả (.zip)';
 };
@@ -313,7 +376,10 @@ function showLB(){
 const step=d=>{ S.lbIdx=(S.lbIdx+d+S.lbList.length)%S.lbList.length; showLB(); };
 $('#lbPrev').onclick=()=>step(-1); $('#lbNext').onclick=()=>step(1); $('#lbClose').onclick=closeLB;
 $('#lbDownload').onclick=()=>downloadOne(S.lbList[S.lbIdx]);
-document.addEventListener('keydown',e=>{ if($('#lb').classList.contains('hidden')) return; if(e.key==='Escape') closeLB(); if(e.key==='ArrowLeft') step(-1); if(e.key==='ArrowRight') step(1); });
+document.addEventListener('keydown',e=>{
+  if(!$('#lb').classList.contains('hidden')){ if(e.key==='Escape') closeLB(); if(e.key==='ArrowLeft') step(-1); if(e.key==='ArrowRight') step(1); return; }
+  if(e.key==='Escape') document.querySelectorAll('.modal:not(.hidden)').forEach(m=>{ if(m.id!=='confirm' && !(m.id==='adminModal'&&S.busy)) m.classList.add('hidden'); });
+});
 let tx=null; $('#lb').addEventListener('touchstart',e=>tx=e.touches[0].clientX,{passive:true});
 $('#lb').addEventListener('touchend',e=>{ if(tx==null) return; const dx=e.changedTouches[0].clientX-tx; if(Math.abs(dx)>50) step(dx<0?1:-1); tx=null; });
 $('#lbCover').onclick=async()=>{
@@ -328,7 +394,7 @@ $('#lbDelete').onclick=async()=>{
     if(S.info.cover===p.id) delete S.info.cover;
     await saveIndex();
     for(const k of ['p/'+p.id+'.jpg','t/'+p.id+'.jpg']) try{ await api('/api/file/'+k,{method:'DELETE'}); }catch(e){}
-    S.lbList.splice(S.lbIdx,1); if(S.lbIdx>=S.lbList.length) S.lbIdx=0;
+    const at=S.lbList.indexOf(p); if(at>=0) S.lbList.splice(at,1); if(S.lbIdx>=S.lbList.length) S.lbIdx=0;
     recompute(); renderAll(); showLB(); toast('Đã xoá ảnh');
   }catch(e){ toast('Không xoá được: '+e.message); }
 };
@@ -360,39 +426,106 @@ function openAdmin(){
   const i=S.info||{};
   $('#fTitle').value=i.title||''; $('#fDate').value=i.date||''; $('#fPlace').value=i.place||'';
   $('#fEyebrow').value=i.eyebrow||''; $('#fBrand').value=i.brand||'';
-  renderStats(); $('#adminModal').classList.remove('hidden');
+  $('#driveHint').classList.toggle('hidden',S.hasDrive);
+  renderStats(); renderLogoSlots(); $('#adminModal').classList.remove('hidden');
 }
 $('#adminBtn').onclick=openAdmin;
 $('#saveInfo').onclick=async()=>{
   const old=S.info;
   S.info={...S.info,title:$('#fTitle').value.trim(),date:$('#fDate').value.trim(),place:$('#fPlace').value.trim(),eyebrow:$('#fEyebrow').value.trim(),brand:$('#fBrand').value.trim()};
   $('#infoLog').textContent='Đang lưu…';
-  try{ await saveIndex(); $('#infoLog').textContent='Đã lưu ✓'; renderInfo(); }
+  try{ await saveIndex(); $('#infoLog').textContent='Đã lưu'; renderInfo(); }
   catch(e){ S.info=old; $('#infoLog').textContent='Lỗi: '+e.message; }
 };
-wireDrop($('#photoDrop'),$('#photoInput'),uploadPhotos);
-$('#folderInput').onchange=e=>{ const f=[...e.target.files].filter(f=>f.type.startsWith('image/')); e.target.value=''; if(f.length) uploadPhotos(f); };
-$('#stopUpload').onclick=()=>{ S.stop=true; $('#upLog').textContent='Đang dừng sau ảnh hiện tại…'; };
-window.addEventListener('beforeunload',e=>{ if(S.uploading){ e.preventDefault(); e.returnValue=''; } });
 
-async function uploadPhotos(files){
-  if(S.uploading){ toast('Đang tải lên, chờ xong lượt này.'); return; }
+/* logo */
+const LOGO_HINT=['Logo 1 (VD: LB Global)','Logo 2 (VD: DERMAXILIC)'];
+function renderLogoSlots(){
+  const logos=S.info.logos||[];
+  [0,1].forEach(k=>{
+    const pv=$('#logoPv'+k); pv.textContent='';
+    if(logos[k]){ const img=document.createElement('img'); img.src=fileUrl('l/'+logos[k]+'.png'); img.alt=''; pv.appendChild(img); }
+    else pv.textContent=LOGO_HINT[k];
+  });
+}
+async function setLogo(k, id){
+  const logos=[...(S.info.logos||[null,null])]; while(logos.length<2) logos.push(null);
+  const old=logos[k]; logos[k]=id;
+  const prev=S.info; S.info={...S.info,logos};
+  try{ await saveIndex(); }catch(e){ S.info=prev; throw e; }
+  if(old) api('/api/file/l/'+old+'.png',{method:'DELETE'}).catch(()=>{});
+  renderBrand(); renderLogoSlots();
+}
+document.querySelectorAll('[data-logo]').forEach(inp=>inp.onchange=async()=>{
+  const f=inp.files[0], k=+inp.dataset.logo; inp.value=''; if(!f) return;
+  try{
+    const bmp=await fileToBitmap(f);
+    const blob=await canvasBlob(toCanvas(bmp,800),undefined,'image/png');
+    const id=newId();
+    await api('/api/file/l/'+id+'.png',{method:'PUT',headers:{'content-type':'image/png'},body:blob});
+    await setLogo(k,id); toast('Đã cập nhật logo');
+  }catch(e){ toast('Không tải được logo: '+e.message); }
+});
+document.querySelectorAll('[data-logo-del]').forEach(b=>b.onclick=async()=>{
+  const k=+b.dataset.logoDel; if(!(S.info.logos||[])[k]) return;
+  try{ await setLogo(k,null); toast('Đã gỡ logo'); }catch(e){ toast('Lỗi: '+e.message); }
+});
+
+/* thêm ảnh: từ máy tính hoặc Google Drive */
+wireDrop($('#photoDrop'),$('#photoInput'),files=>ingest(fromFiles(files)));
+$('#folderInput').onchange=e=>{ const f=[...e.target.files]; e.target.value=''; if(f.length) ingest(fromFiles(f)); };
+$('#stopUpload').onclick=()=>{ S.stop=true; $('#upLog').textContent='Đang dừng sau ảnh hiện tại…'; };
+window.addEventListener('beforeunload',e=>{ if(S.busy){ e.preventDefault(); e.returnValue=''; } });
+const fromFiles = files => files.filter(f=>f.type.startsWith('image/')).map(f=>({name:f.name,size:f.size,taken:f.lastModified||0,blob:async()=>f}));
+
+$('#driveBtn').onclick=async()=>{
+  if(S.busy){ toast('Đang xử lý, chờ xong lượt này.'); return; }
+  if(!S.hasDrive){ toast('Chưa đặt GOOGLE_API_KEY trên Cloudflare.'); return; }
+  const v=$('#driveUrl').value.trim();
+  const m=v.match(/folders\/([A-Za-z0-9_-]{10,})/) || v.match(/[?&]id=([A-Za-z0-9_-]{10,})/) || v.match(/^([A-Za-z0-9_-]{20,})$/);
+  if(!m){ toast('Hãy dán link thư mục Google Drive.'); return; }
+  const log=$('#upLog'); const btn=$('#driveBtn'); btn.disabled=true;
+  try{
+    const queue=[m[1]], seen=new Set(queue), files=[];
+    while(queue.length){
+      const folder=queue.shift(); let token=null;
+      do{
+        log.textContent=`Đang đọc danh sách ảnh trên Drive… (${files.length})`;
+        const d=await (await api('/api/drive/list?folder='+folder+(token?'&pageToken='+encodeURIComponent(token):''))).json();
+        files.push(...d.files);
+        for(const id of d.folders) if(!seen.has(id)){ seen.add(id); queue.push(id); }
+        token=d.next;
+      }while(token);
+    }
+    if(!files.length){ log.textContent='Không thấy ảnh nào. Kiểm tra thư mục đã để "Bất kỳ ai có đường liên kết" chưa.'; return; }
+    btn.disabled=false;
+    await ingest(files.map(f=>({name:f.name,size:+f.size||0,taken:Date.parse(f.modifiedTime)||0,
+      blob:async()=>await (await api('/api/drive/img?id='+f.id)).blob()})));
+  }catch(e){ log.textContent='Không đọc được Drive: '+e.message; }
+  finally{ btn.disabled=false; }
+};
+
+async function ingest(sources){
+  if(S.busy){ toast('Đang xử lý, chờ xong lượt này.'); return; }
   if(!S.canEdit){ toast('Hãy đăng nhập quản trị trước.'); return; }
-  files=files.filter(f=>f.type.startsWith('image/'));
+  const log=$('#upLog'), bar=$('#upBar');
   try{ await loadIndex(); }catch(e){ toast('Không đọc được album: '+e.message); return; }  // lấy bản mới nhất trước khi thêm
   const existing=new Set(S.photos.map(p=>p.name+'|'+p.osize));
-  const todo=files.filter(f=>!existing.has(f.name+'|'+f.size));
-  const skipped=files.length-todo.length;
-  if(!todo.length){ toast('Các ảnh này đã có trong album.'); return; }
-  S.uploading=true; S.stop=false; $('#stopUpload').classList.remove('hidden');
-  const log=$('#upLog'), bar=$('#upBar');
-  let done=0, faces=0, fails=0, pending=0; const t0=Date.now();
+  const todo=sources.filter(s=>!existing.has(s.name+'|'+s.size));
+  const skipped=sources.length-todo.length;
+  if(!todo.length){ log.textContent=`Tất cả ${sources.length} ảnh này đã có trong album.`; return; }
+  S.busy=true; S.stop=false; $('#stopUpload').classList.remove('hidden'); bar.style.width='0';
+  let done=0, faces=0, fails=0, pending=0, lastErr=''; const t0=Date.now();
   try{ await loadModels(t=>log.textContent=t); }
-  catch(e){ log.textContent='Không tải được mô hình AI: '+e.message; S.uploading=false; $('#stopUpload').classList.add('hidden'); return; }
-  for(const f of todo){
+  catch(e){ log.textContent='Không tải được mô hình AI: '+e.message; S.busy=false; $('#stopUpload').classList.add('hidden'); return; }
+  const blobs=[]; const getBlob=i=>{ if(i>=todo.length) return null; if(!blobs[i]){ blobs[i]=todo[i].blob(); blobs[i].catch(()=>{}); } return blobs[i]; };
+  for(let i=0;i<todo.length;i++){
     if(S.stop) break;
+    const src=todo[i];
     try{
-      const bmp=await fileToBitmap(f);
+      const bp=getBlob(i); getBlob(i+1); getBlob(i+2);          // tải trước 2 ảnh kế tiếp
+      const blob=await bp; blobs[i]=null;
+      const bmp=await fileToBitmap(blob);
       const det=toCanvas(bmp,1600);
       const res=await detectAll(det,0.45);
       const bigC=toCanvas(bmp,2048), big=await canvasBlob(bigC,.86);
@@ -401,27 +534,104 @@ async function uploadPhotos(files){
       const id=newId();
       await api('/api/file/p/'+id+'.jpg',{method:'PUT',headers:{'content-type':'image/jpeg'},body:big});
       await api('/api/file/t/'+id+'.jpg',{method:'PUT',headers:{'content-type':'image/jpeg'},body:th});
-      const rec={ id, name:f.name, osize:f.size, w:thC.width, h:thC.height, bytes:big.size+th.size,
-        at:Date.now(), taken:f.lastModified||0, f:res.map(r=>encodeFace(r.descriptor)) };
+      const rec={ id, name:src.name, osize:src.size, w:thC.width, h:thC.height, bytes:big.size+th.size,
+        at:Date.now(), taken:src.taken||0,
+        f:res.map(r=>encodeFace(r.descriptor)),
+        b:res.map(r=>{ const x=r.detection.box; return [x.x/det.width,x.y/det.height,x.width/det.width,x.height/det.height].map(v=>Math.round(v*1000)); }),
+        g:res.map(()=>0) };
       rec._f=rec.f.map(decodeFace);
       S.photos.push(rec); faces+=res.length; pending++;
       if(pending>=SAVE_EVERY){ await saveIndex(); pending=0; }
     }catch(e){
-      console.error(f.name,e); fails++;
+      console.error(src.name,e); fails++; lastErr=e.message;
       if(e.status===401){ toast('Phiên quản trị hết hạn, đăng nhập lại.'); break; }
     }
     done++;
     const eta=Math.round((Date.now()-t0)/done*(todo.length-done)/1000);
     bar.style.width=(done/todo.length*100)+'%';
-    log.textContent=`Đã xử lý ${done}/${todo.length} ảnh · ${faces} khuôn mặt${fails?` · ${fails} lỗi`:''}${done<todo.length?` · còn ~${eta>60?Math.round(eta/60)+' phút':eta+' giây'}`:''}`;
-    if(done%25===0){ S.photos.sort((a,b)=>(a.taken||a.at)-(b.taken||b.at)); recompute(); renderAll(); }
+    log.textContent=`Đã xử lý ${done}/${todo.length} ảnh · ${faces} khuôn mặt${fails?` · ${fails} lỗi`:''}${done<todo.length?` · còn khoảng ${eta>90?Math.round(eta/60)+' phút':eta+' giây'}`:''}`;
+    if(done%25===0){ S.photos.sort(byTime); renderAll(); }
   }
-  try{ if(pending) await saveIndex(); }catch(e){ toast('Lưu danh sách ảnh bị lỗi: '+e.message+'. Bấm tải lại lần nữa để thử lại.'); }
-  S.uploading=false; $('#stopUpload').classList.add('hidden');
-  S.photos.sort((a,b)=>(a.taken||a.at)-(b.taken||b.at)); recompute(); renderAll();
-  log.textContent=`Xong: ${done-fails} ảnh mới, ${faces} khuôn mặt${skipped?`, bỏ qua ${skipped} ảnh trùng`:''}${fails?`, ${fails} ảnh lỗi`:''}.`;
-  toast('Tải ảnh lên xong ✓');
+  try{ if(pending) await saveIndex(); }catch(e){ toast('Lưu danh sách ảnh bị lỗi: '+e.message); }
+  S.photos.sort(byTime);
+  const summary=`${done-fails} ảnh mới, ${faces} khuôn mặt${skipped?`, bỏ qua ${skipped} ảnh đã có`:''}${fails?`, ${fails} ảnh lỗi (${lastErr})`:''}`;
+  try{ if(done-fails>0) await clusterFaces(t=>log.textContent=t); }catch(e){ console.error(e); toast('Gom nhóm khuôn mặt bị lỗi: '+e.message); }
+  S.busy=false; $('#stopUpload').classList.add('hidden');
+  recompute(); renderAll();
+  log.textContent=`Xong: ${summary}. Đã gom được ${S.people.length} người.`;
+  toast('Thêm ảnh xong');
 }
+
+/* ---------------- gom nhóm khuôn mặt ---------------- */
+async function clusterFaces(onMsg){
+  onMsg?.('Đang gom nhóm khuôn mặt…');
+  const faces=[];
+  for(const p of S.photos){
+    p.g=new Array(p._f.length).fill(0);
+    p._f.forEach((d,i)=>{ const b=p.b?.[i]; faces.push({p,i,d,a:b?b[2]*b[3]:0}); });
+  }
+  faces.sort((x,y)=>y.a-x.a);                       // mặt to, rõ làm hạt giống trước
+  const C=[];                                        // {sum,c,n,m:[face]}
+  const add=(cl,f)=>{ cl.n++; for(let k=0;k<128;k++){ cl.sum[k]+=f.d[k]; cl.c[k]=cl.sum[k]/cl.n; } cl.m.push(f); };
+  for(let n=0;n<faces.length;n++){
+    const f=faces[n]; let best=null, bd=CLUSTER_T;
+    for(const cl of C){ const d=dist(f.d,cl.c); if(d<bd){ bd=d; best=cl; } }
+    if(!best){ best={sum:new Float32Array(128),c:new Float32Array(128),n:0,m:[]}; C.push(best); }
+    add(best,f);
+    if(n%400===0){ onMsg?.(`Đang gom nhóm khuôn mặt… ${n}/${faces.length}`); await tick(); }
+  }
+  for(let pass=0;pass<3;pass++){                     // gộp các nhóm quá giống nhau
+    let merged=false;
+    for(let i=0;i<C.length;i++){
+      if(!C[i]) continue;
+      for(let j=i+1;j<C.length;j++){
+        if(!C[j]) continue;
+        if(dist(C[i].c,C[j].c)<MERGE_T){ for(const f of C[j].m) add(C[i],f); C[j]=null; merged=true; }
+      }
+      if(i%50===0) await tick();
+    }
+    if(!merged) break;
+  }
+  const groups=C.filter(Boolean).map(cl=>({cl,photos:new Set(cl.m.map(f=>f.p.id)).size}))
+    .filter(x=>x.photos>=MIN_PHOTOS).sort((a,b)=>b.photos-a.photos).slice(0,MAX_PEOPLE);
+  const oldAv=new Set(S.people.map(x=>x.av));
+  const people=[];
+  for(let k=0;k<groups.length;k++){
+    const {cl}=groups[k], id=k+1;
+    for(const f of cl.m) f.p.g[f.i]=id;
+    const rep=cl.m.reduce((a,b)=>b.a>a.a?b:a);
+    const av=`f/${rep.p.id}-${rep.i}.jpg`;
+    if(!oldAv.has(av)){
+      onMsg?.(`Đang tạo ảnh đại diện ${k+1}/${groups.length}…`);
+      try{ await makeAvatar(rep,av); }catch(e){ console.warn('avatar',e); }
+    }
+    people.push({id,av});
+  }
+  const keep=new Set(people.map(x=>x.av));
+  S.people=people;
+  await saveIndex();
+  for(const av of oldAv) if(!keep.has(av)) api('/api/file/'+av,{method:'DELETE'}).catch(()=>{});
+  if(S.person && !people.some(x=>x.id===S.person)) S.person=null;
+}
+async function makeAvatar(face, key){
+  const blob=await (await fetch('/api/file/p/'+face.p.id+'.jpg')).blob();
+  const bmp=await createImageBitmap(blob);
+  const b=face.p.b[face.i].map(v=>v/1000);
+  const w=b[2]*bmp.width, h=b[3]*bmp.height, cx=b[0]*bmp.width+w/2, cy=b[1]*bmp.height+h/2;
+  const side=Math.max(w,h)*1.7;
+  const c=document.createElement('canvas'); c.width=c.height=160;
+  const ctx=c.getContext('2d'); ctx.fillStyle='#fdeef3'; ctx.fillRect(0,0,160,160);
+  ctx.drawImage(bmp,cx-side/2,cy-side/2-h*0.05,side,side,0,0,160,160);
+  bmp.close?.();
+  await api('/api/file/'+key,{method:'PUT',headers:{'content-type':'image/jpeg'},body:await canvasBlob(c,.85)});
+}
+$('#clusterBtn').onclick=async()=>{
+  if(S.busy){ toast('Đang xử lý, chờ xong lượt này.'); return; }
+  const log=$('#clusterLog'); S.busy=true; $('#clusterBtn').disabled=true;
+  try{ await loadIndex(); await clusterFaces(t=>log.textContent=t); log.textContent=`Đã gom được ${S.people.length} người.`; }
+  catch(e){ log.textContent='Lỗi: '+e.message; }
+  S.busy=false; $('#clusterBtn').disabled=false; renderAll();
+};
 
 /* ---------------- khởi động ---------------- */
 (async()=>{
@@ -429,8 +639,7 @@ async function uploadPhotos(files){
   const note=$('#loadNote'); note.dataset.loading='1'; renderAll();
   try{
     const cfg=await (await fetch('/api/config')).json();
-    S.publicUrl=cfg.publicUrl||'';
-    if(!cfg.hasPassword) $('#loginLink').title='Chưa đặt ADMIN_PASSWORD trên Cloudflare';
+    S.publicUrl=cfg.publicUrl||''; S.hasDrive=!!cfg.hasDrive;
     await loadIndex();
     delete note.dataset.loading; note.textContent='';
   }catch(e){
@@ -438,5 +647,5 @@ async function uploadPhotos(files){
   }
   let pw=null; try{ pw=sessionStorage.getItem('album.pw'); }catch(e){}
   if(pw) await tryLogin(pw);
-  recompute(); renderAll();
+  recompute(); showChip(); renderAll();
 })();

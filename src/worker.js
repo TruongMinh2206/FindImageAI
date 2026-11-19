@@ -4,12 +4,14 @@
 // Biến môi trường:
 //   ADMIN_PASSWORD  (Secret)  – mật khẩu quản trị album
 //   PUBLIC_URL      (tuỳ chọn) – tên miền công khai của bucket R2, VD https://anh.tenmien.com
+//   GOOGLE_API_KEY  (Secret, tuỳ chọn) – để nhập ảnh từ thư mục Google Drive công khai
 // Binding:
 //   BUCKET – R2 bucket chứa ảnh và index.json
 //   ASSETS – thư mục public/
 
 const INDEX_KEY = 'index.json';
-const FILE_RE = /^(p|t)\/[A-Za-z0-9_-]{6,64}\.jpg$/;
+const FILE_RE = /^((p|t|f)\/[A-Za-z0-9_-]{6,80}\.jpg|l\/[A-Za-z0-9_-]{6,64}\.png)$/;
+const DRIVE_ID_RE = /^[A-Za-z0-9_-]{10,100}$/;
 
 const json = (data, status = 200, extra = {}) =>
   new Response(JSON.stringify(data), {
@@ -42,6 +44,7 @@ export default {
       return json({
         publicUrl: (env.PUBLIC_URL || '').replace(/\/+$/, ''),
         hasPassword: !!env.ADMIN_PASSWORD,
+        hasDrive: !!env.GOOGLE_API_KEY,
       });
     }
 
@@ -85,7 +88,7 @@ export default {
       if (method === 'PUT') {
         if (!isAdmin(req, env)) return json({ error: 'Sai mật khẩu' }, 401);
         await env.BUCKET.put(key, req.body, {
-          httpMetadata: { contentType: 'image/jpeg', cacheControl: 'public, max-age=31536000, immutable' },
+          httpMetadata: { contentType: key.endsWith('.png') ? 'image/png' : 'image/jpeg', cacheControl: 'public, max-age=31536000, immutable' },
         });
         return json({ ok: true, key });
       }
@@ -93,6 +96,61 @@ export default {
         if (!isAdmin(req, env)) return json({ error: 'Sai mật khẩu' }, 401);
         await env.BUCKET.delete(key);
         return json({ ok: true });
+      }
+    }
+
+    // Nhập ảnh từ Google Drive (chỉ quản trị)
+    if (path.startsWith('/api/drive/') && method === 'GET') {
+      if (!isAdmin(req, env)) return json({ error: 'Sai mật khẩu' }, 401);
+      const key = env.GOOGLE_API_KEY;
+      const apiBase = env.DRIVE_API_BASE || 'https://www.googleapis.com/drive/v3';
+
+      if (path === '/api/drive/list') {
+        if (!key) return json({ error: 'Chưa đặt GOOGLE_API_KEY trên Cloudflare.' }, 400);
+        const folder = url.searchParams.get('folder') || '';
+        if (!DRIVE_ID_RE.test(folder)) return json({ error: 'Link thư mục Drive không hợp lệ' }, 400);
+        const qs = new URLSearchParams({
+          q: `'${folder}' in parents and trashed = false and (mimeType contains 'image/' or mimeType = 'application/vnd.google-apps.folder')`,
+          fields: 'nextPageToken,files(id,name,size,modifiedTime,mimeType)',
+          pageSize: '1000',
+          supportsAllDrives: 'true',
+          includeItemsFromAllDrives: 'true',
+          key,
+        });
+        const token = url.searchParams.get('pageToken');
+        if (token) qs.set('pageToken', token);
+        const r = await fetch(`${apiBase}/files?${qs}`);
+        if (!r.ok) {
+          let msg = '';
+          try { msg = (await r.json()).error?.message || ''; } catch (e) {}
+          return json({ error: `Google Drive báo lỗi ${r.status}. ${msg}`.trim() }, 502);
+        }
+        const d = await r.json();
+        const all = d.files || [];
+        return json({
+          files: all.filter(f => f.mimeType !== 'application/vnd.google-apps.folder'),
+          folders: all.filter(f => f.mimeType === 'application/vnd.google-apps.folder').map(f => f.id),
+          next: d.nextPageToken || null,
+        });
+      }
+
+      if (path === '/api/drive/img') {
+        const id = url.searchParams.get('id') || '';
+        if (!DRIVE_ID_RE.test(id)) return json({ error: 'Mã file không hợp lệ' }, 400);
+        const isImg = r => r.ok && (r.headers.get('content-type') || '').startsWith('image/');
+        // Ưu tiên bản Google đã thu nhỏ (nhẹ hơn ảnh gốc nhiều lần); không được thì lấy ảnh gốc
+        const thumbBase = env.DRIVE_THUMB_BASE || 'https://drive.google.com/thumbnail';
+        let r = await fetch(`${thumbBase}?id=${id}&sz=w2048`).catch(() => null);
+        let src = 'thumb';
+        if (!r || !isImg(r)) {
+          if (!key) return json({ error: 'Không lấy được ảnh từ Drive' }, 502);
+          r = await fetch(`${apiBase}/files/${id}?alt=media&supportsAllDrives=true&key=${key}`);
+          src = 'original';
+          if (!isImg(r)) return json({ error: 'Không lấy được ảnh từ Drive (' + r.status + ')' }, 502);
+        }
+        return new Response(r.body, {
+          headers: { 'content-type': r.headers.get('content-type'), 'cache-control': 'no-store', 'x-drive-source': src },
+        });
       }
     }
 
