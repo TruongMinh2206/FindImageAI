@@ -9,7 +9,10 @@ const CLUSTER_T = 0.46;      // ngưỡng gom 1 khuôn mặt vào nhóm
 const MERGE_T = 0.36;        // ngưỡng gộp 2 nhóm
 const MIN_PHOTOS = 2;        // người xuất hiện ít nhất N ảnh mới hiện ra
 const MAX_PEOPLE = 400;
-const ZIP_MAX = 500;           // số ảnh tối đa cho 1 lần tải zip
+const ZIP_MAX = 500;
+const BIG = 3200, TILE = 1280, TSTEP = 1000;   // quét chia ô để bắt mặt nhỏ
+const MIN_FACE = 26, MAX_FACES = 80, SEED_FACE = 44;   // cỡ mặt (px) tối thiểu để lấy / để làm hạt giống nhóm
+const MAX_SELFIES = 3;           // số ảnh tối đa cho 1 lần tải zip
 
 /* ---------------- state ---------------- */
 const S = {
@@ -115,6 +118,46 @@ async function detectAll(canvas, minConf=0.45){
   return await faceapi.detectAllFaces(canvas,opts).withFaceLandmarks().withFaceDescriptors();
 }
 
+function tileStarts(L){ if(L<=TILE) return [0]; const n=Math.ceil((L-TILE)/TSTEP)+1, st=(L-TILE)/(n-1); return Array.from({length:n},(_,i)=>Math.round(i*st)); }
+function iou(a,b){
+  const x=Math.max(a.x,b.x), y=Math.max(a.y,b.y), X=Math.min(a.x+a.w,b.x+b.w), Y=Math.min(a.y+a.h,b.y+b.h);
+  const i=Math.max(0,X-x)*Math.max(0,Y-y); return i/(a.w*a.h+b.w*b.h-i||1);
+}
+// Tìm mọi khuôn mặt trong ảnh: quét toàn ảnh + từng ô phóng to, rồi lấy vector từ vùng mặt nét nhất
+async function scanFaces(src, deep){
+  const big=toCanvas(src,BIG), W=big.width, H=big.height, cands=[];
+  const opt=new faceapi.SsdMobilenetv1Options({minConfidence:0.45,maxResults:100});
+  const full=toCanvas(big,1600), k=W/full.width;
+  for(const r of await faceapi.detectAllFaces(full,opt)) cands.push({x:r.box.x*k,y:r.box.y*k,w:r.box.width*k,h:r.box.height*k,s:r.score});
+  if(deep && Math.max(W,H)>TILE*1.2){
+    const tw=Math.min(TILE,W), th=Math.min(TILE,H), t=document.createElement('canvas'); t.width=tw; t.height=th;
+    const ctx=t.getContext('2d');
+    for(const y0 of tileStarts(H)) for(const x0 of tileStarts(W)){
+      ctx.drawImage(big,x0,y0,tw,th,0,0,tw,th);
+      for(const r of await faceapi.detectAllFaces(t,opt)){
+        const b=r.box, e=3;
+        if((b.x<e&&x0>0)||(b.y<e&&y0>0)||(b.x+b.width>tw-e&&x0+tw<W)||(b.y+b.height>th-e&&y0+th<H)) continue;   // mặt bị cắt ở mép ô
+        cands.push({x:b.x+x0,y:b.y+y0,w:b.width,h:b.height,s:r.score});
+      }
+    }
+  }
+  cands.sort((a,b)=>b.s-a.s);
+  const keep=[]; for(const c of cands) if(Math.min(c.w,c.h)>=MIN_FACE && !keep.some(q=>iou(q,c)>0.35)) keep.push(c);
+  keep.sort((a,b)=>b.w*b.h-a.w*a.h); keep.length=Math.min(keep.length,MAX_FACES);
+  const out=[], one=new faceapi.SsdMobilenetv1Options({minConfidence:0.3});
+  for(const c of keep){
+    const side=Math.max(c.w,c.h)*2.2, sx=c.x+c.w/2-side/2, sy=c.y+c.h/2-side/2, cs=Math.max(160,Math.min(420,Math.round(side)));
+    const cv=document.createElement('canvas'); cv.width=cv.height=cs;
+    const cx=cv.getContext('2d'); cx.fillStyle='#777'; cx.fillRect(0,0,cs,cs);
+    const ix=Math.max(0,sx), iy=Math.max(0,sy), iX=Math.min(W,sx+side), iY=Math.min(H,sy+side), f=cs/side;
+    cx.drawImage(big,ix,iy,iX-ix,iY-iy,(ix-sx)*f,(iy-sy)*f,(iX-ix)*f,(iY-iy)*f);
+    const r=await faceapi.detectSingleFace(cv,one).withFaceLandmarks().withFaceDescriptor();
+    if(!r) continue;                                   // không xác nhận lại được: bỏ (thường là nhận nhầm)
+    out.push({d:r.descriptor, b:[c.x/W,c.y/H,c.w/W,c.h/H].map(v=>Math.round(v*1000)), q:Math.round(Math.min(c.w,c.h))});
+  }
+  return out;
+}
+
 /* ---------------- hiển thị ---------------- */
 function renderBrand(){
   const i=S.info||{}, logos=(i.logos||[]).filter(Boolean);
@@ -172,7 +215,7 @@ function pickPerson(id){
   S.person=id; S.selfie=null; S.selfieUrl=null; S.matches.clear(); saveSelfie();
   $('#peopleModal').classList.add('hidden'); showChip(); renderGrid(); toGrid();
 }
-const hasFilter = () => !!(S.person || S.selfie);
+const hasFilter = () => !!(S.person || S.selfie?.length);
 function categories(){
   const m=new Map(); for(const p of S.photos) if(p.c) m.set(p.c,(m.get(p.c)||0)+1);
   return [...m.keys()].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true}));
@@ -189,7 +232,7 @@ function currentList(){
   let list=S.photos;
   if(S.cat) list=list.filter(p=>p.c===S.cat);
   if(S.person) list=list.filter(p=>p.g?.includes(S.person));
-  else if(S.selfie) list=list.filter(p=>S.matches.has(p.id));
+  else if(S.selfie?.length) list=list.filter(p=>S.matches.has(p.id));
   list=[...list];
   if(S.sort==='new') list.sort((a,b)=>byTime(b,a));
   else if(S.sort==='name') list.sort((a,b)=>(a.name||'').localeCompare(b.name||'','vi',{numeric:true}));
@@ -206,6 +249,7 @@ function tile(p, list, idx){
   if(S.selfie && !S.person && S.matches.has(p.id)){
     const b=document.createElement('span'); b.className='badge';
     const dd=S.matches.get(p.id); b.textContent= dd<0.40?'Rất giống':dd<0.48?'Giống':'Có thể là bạn';
+    if(dd>=0.6) b.title='AI đoán theo nhóm khuôn mặt đã gom';
     d.appendChild(b);
   }
   const dl=document.createElement('button'); dl.className='dl'; dl.innerHTML=ICON_DL; dl.setAttribute('aria-label','Tải ảnh');
@@ -263,12 +307,21 @@ $('#shareBtn').onclick=async()=>{
 
 /* ---------------- so khớp selfie ---------------- */
 function recompute(){
-  S.matches.clear(); if(!S.selfie) return;
+  S.matches.clear(); if(!S.selfie?.length) return;
+  const strong=new Map(), total=new Map();           // theo nhóm người: số mặt khớp chắc / tổng số mặt
   for(const p of S.photos){
     if(!p._f?.length) continue;
-    let best=9; for(const f of p._f){ const d=dist(S.selfie,f); if(d<best) best=d; }
+    let best=9;
+    p._f.forEach((f,i)=>{
+      let d=9; for(const sv of S.selfie){ const x=dist(sv,f); if(x<d) d=x; }
+      if(d<best) best=d;
+      const g=p.g?.[i]; if(g){ total.set(g,(total.get(g)||0)+1); if(d<=Math.min(S.threshold,0.45)) strong.set(g,(strong.get(g)||0)+1); }
+    });
     if(best<=S.threshold) S.matches.set(p.id,best);
   }
+  // Nếu selfie khớp chắc với một nhóm người đã gom, lấy thêm các ảnh còn lại của nhóm đó (góc nghiêng, mặt nhỏ…)
+  const mine=new Set(); for(const [g,n] of strong) if(n>=2 && n>=total.get(g)*0.3) mine.add(g);
+  if(mine.size) for(const p of S.photos) if(!S.matches.has(p.id) && p.g?.some(g=>mine.has(g))) S.matches.set(p.id,0.6);
 }
 const thName = v => v<0.47?'Chặt':v>0.56?'Rộng':'Cân bằng';
 $('#th').oninput=e=>{
@@ -278,14 +331,15 @@ $('#th').oninput=e=>{
 };
 function saveSelfie(){
   try{
-    if(S.selfie) localStorage.setItem('album.selfie',JSON.stringify({d:Array.from(S.selfie),t:S.threshold,u:S.selfieUrl}));
+    if(S.selfie?.length) localStorage.setItem('album.selfie',JSON.stringify({ds:S.selfie.map(d=>Array.from(d)),t:S.threshold,u:S.selfieUrl}));
     else localStorage.removeItem('album.selfie');
   }catch(e){}
 }
 function restoreSelfie(){
   try{
     const v=JSON.parse(localStorage.getItem('album.selfie')||'null');
-    if(v?.d?.length===128){ S.selfie=Float32Array.from(v.d); S.threshold=v.t||0.52; S.selfieUrl=v.u||null; $('#th').value=S.threshold; }
+    const ds=(v?.ds||(v?.d?[v.d]:[])).filter(d=>d?.length===128);
+    if(ds.length){ S.selfie=ds.map(d=>Float32Array.from(d)); S.threshold=v.t||0.52; S.selfieUrl=v.u||null; $('#th').value=S.threshold; }
   }catch(e){}
 }
 function showChip(){
@@ -298,6 +352,7 @@ $('#clearSel').onclick=()=>{ S.person=null; S.selfie=null; S.selfieUrl=null; S.m
 
 /* ---------------- tìm bằng selfie ---------------- */
 function openFace(){
+  S.addMode=false;
   $('#faceModal').classList.remove('hidden');
   $('#faceStep1').classList.remove('hidden'); $('#faceStep2').classList.add('hidden');
   loadModels().catch(()=>{});
@@ -311,7 +366,8 @@ function wireDrop(el,input,handler){
   el.addEventListener('drop',e=>{e.preventDefault(); el.classList.remove('over'); const f=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/')); if(f.length) handler(f);});
 }
 wireDrop($('#selfieDrop'),$('#selfieInput'),files=>runSelfie(files[0]));
-$('#retrySelfie').onclick=()=>{ $('#faceStep1').classList.remove('hidden'); $('#faceStep2').classList.add('hidden'); };
+$('#retrySelfie').onclick=()=>{ S.addMode=false; $('#faceStep1').classList.remove('hidden'); $('#faceStep2').classList.add('hidden'); };
+$('#addSelfie').onclick=()=>{ S.addMode=true; $('#faceStep1').classList.remove('hidden'); $('#faceStep2').classList.add('hidden'); };
 $('#showMine').onclick=()=>{ $('#faceModal').classList.add('hidden'); renderGrid(); toGrid(); };
 
 async function runSelfie(file){
@@ -337,15 +393,16 @@ async function runSelfie(file){
     const fc=document.createElement('canvas'); fc.width=fc.height=200;
     fc.getContext('2d').drawImage(c,Math.max(0,bx.x-pad),Math.max(0,bx.y-pad),bx.width+pad*2,bx.height+pad*2,0,0,200,200);
     S.selfieUrl=fc.toDataURL('image/jpeg',.8); $('#selfiePreview').src=S.selfieUrl;
-    S.selfie=best.descriptor; S.person=null; S.sort='match';
+    if(S.addMode && S.selfie?.length && S.selfie.length<MAX_SELFIES) S.selfie=[...S.selfie,best.descriptor]; else S.selfie=[best.descriptor];
+    S.addMode=false; S.person=null; S.sort='match';
     msg.textContent='Đang so khớp với '+S.photos.length.toLocaleString('vi-VN')+' ảnh…';
     await new Promise(r=>setTimeout(r,300));
     recompute(); saveSelfie(); showChip(); renderPeople(); s2.classList.add('done');
     const n=S.matches.size;
     if(n){ msg.textContent='Tìm thấy '; const em=document.createElement('em'); em.textContent=n+' ảnh'; msg.append(em,' có bạn');
-      const s=document.createElement('small'); s.textContent=(dets.length>1?'Ảnh có nhiều người, AI chọn khuôn mặt lớn nhất. ':'')+'Kéo thanh bên dưới nếu thấy thiếu hoặc thừa ảnh.'; msg.appendChild(s); }
+      const s=document.createElement('small'); s.textContent=(S.selfie.length>1?`Đang dùng ${S.selfie.length} ảnh selfie. `:'')+(dets.length>1?'Ảnh có nhiều người, AI chọn khuôn mặt lớn nhất. ':'')+'Thiếu ảnh? Thêm selfie góc khác hoặc kéo thanh bên dưới.'; msg.appendChild(s); }
     else say('Chưa tìm thấy ảnh nào khớp','Thử nới độ khớp rộng hơn hoặc dùng ảnh selfie khác.');
-    $('#scanActions').classList.remove('hidden'); $('#showMine').classList.toggle('hidden',!n);
+    $('#scanActions').classList.remove('hidden'); $('#showMine').classList.toggle('hidden',!n); $('#addSelfie').classList.toggle('hidden',S.selfie.length>=MAX_SELFIES);
     $('#sliderWrap').classList.remove('hidden'); $('#thLabel').textContent=thName(S.threshold); $('#thCount').textContent=n+' ảnh';
     renderGrid();
   }catch(e){
@@ -517,9 +574,9 @@ $('#driveBtn').onclick=async()=>{
       }while(token);
     }
     if(!files.length){ log.textContent='Không thấy ảnh nào. Kiểm tra thư mục đã để "Bất kỳ ai có đường liên kết" chưa.'; return; }
-    btn.disabled=false;
+    btn.disabled=false; const orig=$('#origChk').checked;
     await ingest(files.map(f=>({name:f.name,size:+f.size||0,taken:Date.parse(f.modifiedTime)||0,cat:f.cat,
-      blob:async()=>await (await api('/api/drive/img?id='+f.id)).blob()})));
+      blob:async()=>await (await api('/api/drive/img?id='+f.id+(orig?'&orig=1':''))).blob()})));
   }catch(e){ log.textContent='Không đọc được Drive: '+e.message; }
   finally{ btn.disabled=false; }
 };
@@ -534,7 +591,7 @@ async function ingest(sources){
   const skipped=sources.length-todo.length;
   if(!todo.length){ log.textContent=`Tất cả ${sources.length} ảnh này đã có trong album.`; return; }
   S.busy=true; S.stop=false; $('#stopUpload').classList.remove('hidden'); bar.style.width='0';
-  let done=0, faces=0, fails=0, pending=0, lastErr=''; const t0=Date.now();
+  let done=0, faces=0, fails=0, pending=0, lastErr=''; const t0=Date.now(), deep=$('#deepChk').checked;
   try{ await loadModels(t=>log.textContent=t); }
   catch(e){ log.textContent='Không tải được mô hình AI: '+e.message; S.busy=false; $('#stopUpload').classList.add('hidden'); return; }
   const blobs=[]; const getBlob=i=>{ if(i>=todo.length) return null; if(!blobs[i]){ blobs[i]=todo[i].blob(); blobs[i].catch(()=>{}); } return blobs[i]; };
@@ -545,8 +602,7 @@ async function ingest(sources){
       const bp=getBlob(i); getBlob(i+1); getBlob(i+2);          // tải trước 2 ảnh kế tiếp
       const blob=await bp; blobs[i]=null;
       const bmp=await fileToBitmap(blob);
-      const det=toCanvas(bmp,1600);
-      const res=await detectAll(det,0.45);
+      const res=await scanFaces(bmp,deep);
       const bigC=toCanvas(bmp,2048), big=await canvasBlob(bigC,.86);
       const thC=toCanvas(bmp,720), th=await canvasBlob(thC,.8);
       bmp.close?.();
@@ -555,9 +611,7 @@ async function ingest(sources){
       await api('/api/file/t/'+id+'.jpg',{method:'PUT',headers:{'content-type':'image/jpeg'},body:th});
       const rec={ id, name:src.name, osize:src.size, w:thC.width, h:thC.height, bytes:big.size+th.size,
         at:Date.now(), taken:src.taken||0,
-        f:res.map(r=>encodeFace(r.descriptor)),
-        b:res.map(r=>{ const x=r.detection.box; return [x.x/det.width,x.y/det.height,x.width/det.width,x.height/det.height].map(v=>Math.round(v*1000)); }),
-        g:res.map(()=>0) };
+        f:res.map(r=>encodeFace(r.d)), b:res.map(r=>r.b), q:res.map(r=>r.q), g:res.map(()=>0), v:deep?2:1 };
       if(src.cat) rec.c=src.cat;
       rec._f=rec.f.map(decodeFace);
       S.photos.push(rec); faces+=res.length; pending++;
@@ -588,15 +642,19 @@ async function clusterFaces(onMsg){
   const faces=[];
   for(const p of S.photos){
     p.g=new Array(p._f.length).fill(0);
-    p._f.forEach((d,i)=>{ const b=p.b?.[i]; faces.push({p,i,d,a:b?b[2]*b[3]:0}); });
+    p._f.forEach((d,i)=>{ const b=p.b?.[i]; faces.push({p,i,d,a:b?b[2]*b[3]:0,q:p.q?.[i]??99}); });
   }
-  faces.sort((x,y)=>y.a-x.a);                       // mặt to, rõ làm hạt giống trước
+  faces.sort((x,y)=>(y.q-x.q)||(y.a-x.a));           // mặt to, rõ làm hạt giống trước
   const C=[];                                        // {sum,c,n,m:[face]}
   const add=(cl,f)=>{ cl.n++; for(let k=0;k<128;k++){ cl.sum[k]+=f.d[k]; cl.c[k]=cl.sum[k]/cl.n; } cl.m.push(f); };
   for(let n=0;n<faces.length;n++){
     const f=faces[n]; let best=null, bd=CLUSTER_T;
     for(const cl of C){ const d=dist(f.d,cl.c); if(d<bd){ bd=d; best=cl; } }
-    if(!best){ best={sum:new Float32Array(128),c:new Float32Array(128),n:0,m:[]}; C.push(best); }
+    if(!best){
+      if(f.q<SEED_FACE) continue;                    // mặt quá nhỏ: không lập nhóm mới, lát nữa gán sau
+      best={sum:new Float32Array(128),c:new Float32Array(128),n:0,m:[]}; C.push(best);
+    }
+    else if(f.q<SEED_FACE){ if(bd<0.42) best.m.push(f); continue; }   // mặt nhỏ: chỉ gán khi rất giống, không làm lệch tâm nhóm
     add(best,f);
     if(n%400===0){ onMsg?.(`Đang gom nhóm khuôn mặt… ${n}/${faces.length}`); await tick(); }
   }
@@ -619,7 +677,7 @@ async function clusterFaces(onMsg){
   for(let k=0;k<groups.length;k++){
     const {cl}=groups[k], id=k+1;
     for(const f of cl.m) f.p.g[f.i]=id;
-    const rep=cl.m.reduce((a,b)=>b.a>a.a?b:a);
+    const rep=cl.m.reduce((a,b)=>(b.q*1e6+b.a)>(a.q*1e6+a.a)?b:a);
     const av=`f/${rep.p.id}-${rep.i}.jpg`;
     if(!oldAv.has(av)){
       onMsg?.(`Đang tạo ảnh đại diện ${k+1}/${groups.length}…`);
@@ -651,6 +709,36 @@ $('#clusterBtn').onclick=async()=>{
   try{ await loadIndex(); await clusterFaces(t=>log.textContent=t); log.textContent=`Đã gom được ${S.people.length} người.`; }
   catch(e){ log.textContent='Lỗi: '+e.message; }
   S.busy=false; $('#clusterBtn').disabled=false; renderAll();
+};
+
+$('#stopRescan').onclick=()=>{ S.stop=true; };
+$('#rescanBtn').onclick=async()=>{
+  if(S.busy){ toast('Đang xử lý, chờ xong lượt này.'); return; }
+  const log=$('#clusterLog');
+  try{ await loadIndex(); }catch(e){ log.textContent='Lỗi: '+e.message; return; }
+  const todo=S.photos.filter(p=>p.v!==2);
+  if(!todo.length){ log.textContent='Tất cả ảnh đã được quét kỹ rồi.'; return; }
+  if(!await ask('Quét lại khuôn mặt?',`Quét kỹ lại ${todo.length} ảnh đã có để bắt thêm mặt nhỏ. Mất khoảng 3–5 giây mỗi ảnh, cần giữ tab mở. Dừng giữa chừng thì lần sau chạy tiếp.`,'Bắt đầu')) return;
+  S.busy=true; S.stop=false; $('#stopRescan').classList.remove('hidden'); $('#rescanBtn').disabled=true;
+  let done=0, pending=0, fails=0; const t0=Date.now();
+  try{
+    await loadModels(t=>log.textContent=t);
+    for(const p of todo){
+      if(S.stop) break;
+      try{
+        const bmp=await createImageBitmap(await (await fetch('/api/file/p/'+p.id+'.jpg')).blob());
+        const res=await scanFaces(bmp,true); bmp.close?.();
+        p.f=res.map(r=>encodeFace(r.d)); p._f=p.f.map(decodeFace); p.b=res.map(r=>r.b); p.q=res.map(r=>r.q); p.g=res.map(()=>0); p.v=2;
+        if(++pending>=SAVE_EVERY){ await saveIndex(); pending=0; }
+      }catch(e){ console.error(p.id,e); fails++; if(e.status===401) break; }
+      done++; const eta=Math.round((Date.now()-t0)/done*(todo.length-done)/1000);
+      log.textContent=`Đã quét lại ${done}/${todo.length} ảnh${fails?` · ${fails} lỗi`:''} · còn khoảng ${eta>90?Math.round(eta/60)+' phút':eta+' giây'}`;
+    }
+    if(pending) await saveIndex();
+    await clusterFaces(t=>log.textContent=t);
+    log.textContent=`Đã quét lại ${done-fails} ảnh, gom được ${S.people.length} người.`;
+  }catch(e){ log.textContent='Lỗi: '+e.message; }
+  S.busy=false; $('#stopRescan').classList.add('hidden'); $('#rescanBtn').disabled=false; recompute(); renderAll();
 };
 
 /* ---------------- khởi động ---------------- */

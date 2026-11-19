@@ -184,6 +184,8 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
 .logo-slot .pv img{max-height:54px;max-width:100%;object-fit:contain}
 .logo-slot .row{margin-top:0;gap:6px}
 .logo-slot .btn{min-height:38px;padding:0 14px;font-size:13px}
+.chk{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-2);min-height:32px;cursor:pointer}
+.chk input{width:18px;height:18px;accent-color:var(--rose)}
 .hint{background:var(--pink-100);border-radius:var(--r-sm);padding:10px 12px;font-size:13px;color:var(--ink-2);margin-top:12px}
 
 /* Xem ảnh toàn màn hình */
@@ -304,6 +306,7 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
       <div class="msg" id="scanMsg" aria-live="polite">Đang nhận diện khuôn mặt…</div>
       <div class="row hidden" id="scanActions">
         <button class="btn" id="retrySelfie">Chọn ảnh khác</button>
+        <button class="btn" id="addSelfie">Thêm selfie góc khác</button>
         <button class="btn primary" id="showMine">Xem ảnh của tôi</button>
       </div>
       <div class="slider hidden" id="sliderWrap">
@@ -371,6 +374,10 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
       <div class="field"><label for="driveUrl">Nhập từ Google Drive (dán link thư mục, để chế độ "Bất kỳ ai có đường liên kết")</label>
         <div class="row left" style="margin-top:0;flex-wrap:nowrap"><input id="driveUrl" placeholder="https://drive.google.com/drive/folders/…" style="flex:1;min-width:0"><button class="btn primary" id="driveBtn">Nhập ảnh</button></div>
       </div>
+      <div class="row left" style="margin-top:10px;gap:18px">
+        <label class="chk"><input type="checkbox" id="deepChk" checked> Quét kỹ mặt nhỏ (chậm hơn 3–4 lần)</label>
+        <label class="chk"><input type="checkbox" id="origChk"> Lấy ảnh gốc từ Drive (nét nhất, chậm hơn nhiều)</label>
+      </div>
       <div class="hint hidden" id="driveHint">Chưa đặt <b>GOOGLE_API_KEY</b> trên Cloudflare nên chưa nhập từ Drive được. Xem hướng dẫn trong README.</div>
 
       <label class="drop" id="photoDrop">
@@ -390,7 +397,8 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
     <div class="section">
       <h3>Gom nhóm khuôn mặt</h3>
       <p class="sub">AI tự gom các khuôn mặt giống nhau thành từng người để khách chạm vào mặt mình là thấy ảnh. Việc này tự chạy sau mỗi lần thêm ảnh; bấm nút dưới nếu muốn chạy lại.</p>
-      <div class="row left"><button class="btn" id="clusterBtn">Gom nhóm lại</button><span class="log" id="clusterLog" style="margin:0"></span></div>
+      <div class="row left"><button class="btn" id="clusterBtn">Gom nhóm lại</button><button class="btn" id="rescanBtn">Quét lại khuôn mặt cho ảnh đã có</button><button class="btn danger hidden" id="stopRescan">Dừng</button></div>
+      <div class="log" id="clusterLog" aria-live="polite"></div>
     </div>
   </div>
 </div>

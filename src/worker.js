@@ -140,7 +140,8 @@ export default {
         const isImg = r => r.ok && (r.headers.get('content-type') || '').startsWith('image/');
         // Ưu tiên bản Google đã thu nhỏ (nhẹ hơn ảnh gốc nhiều lần); không được thì lấy ảnh gốc
         const thumbBase = env.DRIVE_THUMB_BASE || 'https://drive.google.com/thumbnail';
-        let r = await fetch(`${thumbBase}?id=${id}&sz=w2048`).catch(() => null);
+        const wantOrig = url.searchParams.get('orig') === '1' && key;
+        let r = wantOrig ? null : await fetch(`${thumbBase}?id=${id}&sz=w3200`).catch(() => null);
         let src = 'thumb';
         if (!r || !isImg(r)) {
           if (!key) return json({ error: 'Không lấy được ảnh từ Drive' }, 502);
