@@ -129,7 +129,7 @@ export default {
         const all = d.files || [];
         return json({
           files: all.filter(f => f.mimeType !== 'application/vnd.google-apps.folder'),
-          folders: all.filter(f => f.mimeType === 'application/vnd.google-apps.folder').map(f => f.id),
+          folders: all.filter(f => f.mimeType === 'application/vnd.google-apps.folder').map(f => ({ id: f.id, name: f.name })),
           next: d.nextPageToken || null,
         });
       }

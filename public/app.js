@@ -9,14 +9,14 @@ const CLUSTER_T = 0.46;      // ngưỡng gom 1 khuôn mặt vào nhóm
 const MERGE_T = 0.36;        // ngưỡng gộp 2 nhóm
 const MIN_PHOTOS = 2;        // người xuất hiện ít nhất N ảnh mới hiện ra
 const MAX_PEOPLE = 400;
-const FACES_COLLAPSED = 24;
+const ZIP_MAX = 500;           // số ảnh tối đa cho 1 lần tải zip
 
 /* ---------------- state ---------------- */
 const S = {
   publicUrl:'', hasDrive:false, pw:null, canEdit:false,
-  info:{}, photos:[], people:[], tab:'all', shown:0,
+  info:{}, photos:[], people:[], cat:null, sort:'time', shown:0,
   selfie:null, selfieUrl:null, threshold:0.52, matches:new Map(),
-  person:null, facesAll:false,
+  person:null,
   lbList:[], lbIdx:0, busy:false, stop:false,
 };
 const fileUrl = key => key ? (S.publicUrl ? S.publicUrl + '/' + key : '/api/file/' + key) : '';
@@ -127,22 +127,19 @@ function renderBrand(){
   };
   const b=$('#brand');
   if(logos.length) mk(b,true);
-  else { b.textContent=''; const t=document.createElement('span'); t.className='txt'; t.textContent=i.brand||'ALBUM'; b.appendChild(t); }
+  else { b.textContent=''; if(i.brand){ const t=document.createElement('span'); t.className='txt'; t.textContent=i.brand; b.appendChild(t); } }
   mk($('#footLogos'),false);
   $('#footLogos').classList.toggle('hidden',!logos.length);
   $('#footBrand').textContent = i.brand || i.title || 'Album ảnh';
 }
 function renderInfo(){
   const i=S.info||{};
-  $('#title').textContent = i.title || (S.canEdit ? 'Album chưa đặt tên' : 'Album ảnh');
-  $('#eyebrow').textContent = i.eyebrow || 'Album ảnh sự kiện';
+  $('#title').textContent = i.title ? 'Album '+i.title : (S.canEdit ? 'Album chưa đặt tên' : 'Album ảnh');
+  $('#heroSub').textContent = [i.eyebrow, i.date, i.place].filter(Boolean).join(' · ');
   document.title = (i.title ? i.title+' · ' : '') + 'Album ảnh';
-  const setMeta=(id,v)=>{ const el=$(id); el.classList.toggle('hidden',!v); el.querySelector('b').textContent=v||''; };
-  setMeta('#mDate', i.date); setMeta('#mPlace', i.place);
   const cover = (i.cover && S.photos.some(p=>p.id===i.cover)) ? i.cover : S.photos[0]?.id;
   $('#hero').classList.toggle('nocover', !cover);
   $('#heroBg').style.backgroundImage = cover ? `url("${fileUrl('p/'+cover+'.jpg')}")` : '';
-  $('#mCount b').textContent = S.photos.length.toLocaleString('vi-VN')+' ảnh';
   renderBrand();
 }
 function personCounts(){
@@ -153,14 +150,12 @@ function personCounts(){
 function renderPeople(){
   const counts=personCounts();
   const list=S.people.filter(x=>(counts.get(x.id)||0)>=1);
-  const sec=$('#people'); sec.classList.toggle('hidden',!list.length);
-  if(!list.length) return;
-  $('#peopleSub').textContent=`AI đã nhận diện sẵn ${list.length} người xuất hiện trong ảnh. Chạm vào khuôn mặt của bạn để xem ảnh của mình.`;
-  const host=$('#faces'); host.textContent=''; host.classList.toggle('all',S.facesAll);
-  const self=document.createElement('button'); self.className='face selfie';
-  self.innerHTML=`<span class="av">${ICON_SELFIE}</span><small>Dùng selfie</small>`; self.onclick=openFace; host.appendChild(self);
-  const show=S.facesAll?list:list.slice(0,FACES_COLLAPSED);
-  for(const x of show){
+  $('#peopleStat').classList.toggle('hidden',!list.length); $('#nPeople').textContent=list.length;
+  $('#peopleSub').textContent=list.length
+    ? `AI đã nhận diện sẵn ${list.length} người trong album. Chạm vào khuôn mặt của bạn để xem ảnh của mình, hoặc tìm bằng ảnh selfie.`
+    : 'Tải 1 ảnh selfie để AI lọc ra những ảnh có bạn.';
+  const host=$('#faces'); host.textContent='';
+  for(const x of list){
     const b=document.createElement('button'); b.className='face'+(S.person===x.id?' on':'');
     const n=counts.get(x.id)||0; b.setAttribute('aria-label',`Xem ${n} ảnh của người này`);
     const av=document.createElement('span'); av.className='av';
@@ -168,28 +163,47 @@ function renderPeople(){
     const sm=document.createElement('small'); sm.textContent=n+' ảnh';
     b.append(av,sm); b.onclick=()=>pickPerson(x.id); host.appendChild(b);
   }
-  const tg=$('#peopleToggle'); tg.classList.toggle('hidden',list.length<=FACES_COLLAPSED);
-  tg.textContent=S.facesAll?'Thu gọn':`Xem tất cả ${list.length} người`;
 }
-$('#peopleToggle').onclick=()=>{ S.facesAll=!S.facesAll; renderPeople(); };
+function openPeople(){ renderPeople(); $('#peopleModal').classList.remove('hidden'); }
+$('#peopleBtn').onclick=openPeople; $('#peopleStat').onclick=openPeople;
+$('#selfieBtn').onclick=()=>{ $('#peopleModal').classList.add('hidden'); openFace(); };
+function toGrid(){ $('#bar').scrollIntoView({behavior:'smooth'}); }
 function pickPerson(id){
   S.person=id; S.selfie=null; S.selfieUrl=null; S.matches.clear(); saveSelfie();
-  showChip(); renderPeople(); setTab('mine'); $('#bar').scrollIntoView({behavior:'smooth'});
+  $('#peopleModal').classList.add('hidden'); showChip(); renderGrid(); toGrid();
 }
 const hasFilter = () => !!(S.person || S.selfie);
-function mineList(){
-  if(S.person) return S.photos.filter(p=>p.g?.includes(S.person));
-  if(S.selfie) return S.photos.filter(p=>S.matches.has(p.id)).sort((a,b)=>S.matches.get(a.id)-S.matches.get(b.id));
-  return [];
+function categories(){
+  const m=new Map(); for(const p of S.photos) if(p.c) m.set(p.c,(m.get(p.c)||0)+1);
+  return [...m.keys()].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true}));
 }
-const currentList = () => S.tab==='mine' ? mineList() : S.photos;
+function renderChips(){
+  const cats=categories(), host=$('#chips');
+  if(S.cat && !cats.includes(S.cat)) S.cat=null;
+  host.classList.toggle('hidden',!cats.length); host.textContent='';
+  const mk=(label,val)=>{ const b=document.createElement('button'); b.className='chipbtn'+(S.cat===val?' on':''); b.textContent=label; b.title=label;
+    b.onclick=()=>{ S.cat=val; renderChips(); renderGrid(); }; host.appendChild(b); };
+  mk('Tất cả',null); cats.forEach(c=>mk(c,c));
+}
+function currentList(){
+  let list=S.photos;
+  if(S.cat) list=list.filter(p=>p.c===S.cat);
+  if(S.person) list=list.filter(p=>p.g?.includes(S.person));
+  else if(S.selfie) list=list.filter(p=>S.matches.has(p.id));
+  list=[...list];
+  if(S.sort==='new') list.sort((a,b)=>byTime(b,a));
+  else if(S.sort==='name') list.sort((a,b)=>(a.name||'').localeCompare(b.name||'','vi',{numeric:true}));
+  else if(S.selfie && !S.person && S.sort==='match') list.sort((a,b)=>S.matches.get(a.id)-S.matches.get(b.id));
+  else list.sort(byTime);
+  return list;
+}
 function tile(p, list, idx){
   const d=document.createElement('div'); d.className='tile'; d.tabIndex=0; d.setAttribute('role','button'); d.setAttribute('aria-label','Xem ảnh');
   const img=document.createElement('img'); img.loading='lazy'; img.decoding='async'; img.alt='';
   img.src=fileUrl('t/'+p.id+'.jpg');
   if(p.w&&p.h){ img.width=p.w; img.height=p.h; img.style.aspectRatio=p.w+'/'+p.h; }
   d.appendChild(img);
-  if(S.tab==='mine' && !S.person && S.matches.has(p.id)){
+  if(S.selfie && !S.person && S.matches.has(p.id)){
     const b=document.createElement('span'); b.className='badge';
     const dd=S.matches.get(p.id); b.textContent= dd<0.40?'Rất giống':dd<0.48?'Giống':'Có thể là bạn';
     d.appendChild(b);
@@ -201,24 +215,23 @@ function tile(p, list, idx){
   d.onkeydown=e=>{ if(e.key==='Enter'&&e.target===d) openLB(list,idx); };
   return d;
 }
+let gridList=[];
 function renderGrid(){
-  const list=currentList(), mine=mineList();
+  gridList=currentList(); const list=gridList;
   $('#nAll').textContent=S.photos.length.toLocaleString('vi-VN');
-  $('#nMine').textContent=hasFilter() ? mine.length : '–';
-  $('#zipBtn').classList.toggle('hidden', !(S.tab==='mine' && mine.length));
+  $('#nMine').textContent=list.length;
   $('#grid').textContent=''; S.shown=0; renderMore();
   const empty=$('#empty');
   if(list.length || $('#loadNote').dataset.loading){ empty.classList.add('hidden'); return; }
   empty.classList.remove('hidden'); empty.textContent='';
   const h=document.createElement('h3'), p=document.createElement('p'); empty.append(h,p);
   const btn=(label,cls,fn)=>{ const b=document.createElement('button'); b.className='btn '+cls; b.textContent=label; b.onclick=fn; empty.appendChild(b); };
-  if(S.tab==='mine' && !hasFilter()){ h.textContent='Bạn chưa chọn khuôn mặt'; p.textContent=S.people.length?'Chạm vào khuôn mặt của bạn ở phía trên, hoặc tải 1 ảnh selfie để AI tìm giúp.':'Tải 1 ảnh selfie để AI lọc ra những ảnh có bạn.'; btn('Tìm ảnh bằng selfie','primary',openFace); }
-  else if(S.tab==='mine'){ h.textContent='Chưa tìm thấy ảnh nào có bạn'; p.textContent='Thử một ảnh selfie khác rõ mặt hơn, hoặc nới độ khớp rộng hơn.'; btn('Thử lại','',openFace); }
+  if(hasFilter()){ h.textContent='Chưa tìm thấy ảnh nào có bạn'; p.textContent=S.cat?'Không có ảnh của bạn trong mục này. Thử chọn "Tất cả".':'Thử một ảnh selfie khác rõ mặt hơn, hoặc nới độ khớp rộng hơn.'; btn('Tìm lại','primary',openPeople); }
   else if(S.canEdit){ h.textContent='Album đang trống'; p.textContent='Thêm ảnh sự kiện, AI sẽ tự quét và gom nhóm khuôn mặt.'; btn('Thêm ảnh','primary',openAdmin); }
   else { h.textContent='Album chưa có ảnh'; p.textContent='Ảnh sự kiện sẽ xuất hiện ở đây khi ban tổ chức tải lên.'; }
 }
 function renderMore(){
-  const list=currentList(); if(S.shown>=list.length) return;
+  const list=gridList; if(S.shown>=list.length) return;
   const frag=document.createDocumentFragment();
   const end=Math.min(list.length, S.shown+PAGE);
   for(let i=S.shown;i<end;i++) frag.appendChild(tile(list[i],list,i));
@@ -231,19 +244,22 @@ function renderStats(){
   $('#sPeople').textContent=S.people.length.toLocaleString('vi-VN');
   $('#sSize').textContent=(S.photos.reduce((s,p)=>s+(p.bytes||0),0)/1073741824).toFixed(2)+' GB';
 }
-function renderAll(){ renderInfo(); renderPeople(); renderGrid(); renderStats(); }
+function renderAll(){ renderInfo(); renderPeople(); renderChips(); renderGrid(); renderStats(); }
 
-/* ---------------- tab ---------------- */
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  if(t.dataset.tab==='mine' && !hasFilter() && !S.people.length){ openFace(); return; }
-  setTab(t.dataset.tab);
-});
-function setTab(tab){
-  S.tab=tab;
-  document.querySelectorAll('.tab').forEach(x=>{ x.classList.toggle('on',x.dataset.tab===tab); x.setAttribute('aria-selected',x.dataset.tab===tab); });
-  renderGrid();
-}
-$('#viewAllBtn').onclick=()=>{ setTab('all'); $('#bar').scrollIntoView({behavior:'smooth'}); };
+/* ---------------- thanh công cụ ---------------- */
+$('#viewAllBtn').onclick=toGrid;
+new IntersectionObserver(es=>{ const away=es[0].intersectionRatio>0.35; $('#dock').classList.toggle('away',away); if(away) $('#sortMenu').classList.add('hidden'); },{threshold:[0,0.35,1]}).observe($('#hero'));
+$('#sortBtn').onclick=e=>{ e.stopPropagation(); const m=$('#sortMenu'); m.classList.toggle('hidden');
+  m.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.sort===(S.sort==='match'?'':S.sort))); };
+document.querySelectorAll('#sortMenu button').forEach(b=>b.onclick=()=>{ S.sort=b.dataset.sort; $('#sortMenu').classList.add('hidden'); renderGrid(); });
+document.addEventListener('click',()=>$('#sortMenu').classList.add('hidden'));
+$('#layoutBtn').onclick=()=>{ const on=document.body.classList.toggle('squares'); $('#layoutBtn').classList.toggle('on',on); try{ localStorage.setItem('album.squares',on?'1':''); }catch(e){} };
+try{ if(localStorage.getItem('album.squares')){ document.body.classList.add('squares'); $('#layoutBtn').classList.add('on'); } }catch(e){}
+$('#shareBtn').onclick=async()=>{
+  const url=location.origin+location.pathname, title=S.info.title?'Album '+S.info.title:'Album ảnh';
+  try{ if(navigator.share){ await navigator.share({title,url}); return; } }catch(e){ if(e.name==='AbortError') return; }
+  try{ await navigator.clipboard.writeText(url); toast('Đã sao chép link album'); }catch(e){ toast(url,8000); }
+};
 
 /* ---------------- so khớp selfie ---------------- */
 function recompute(){
@@ -257,7 +273,7 @@ function recompute(){
 const thName = v => v<0.47?'Chặt':v>0.56?'Rộng':'Cân bằng';
 $('#th').oninput=e=>{
   S.threshold=+e.target.value; $('#thLabel').textContent=thName(S.threshold);
-  recompute(); $('#thCount').textContent=S.matches.size+' ảnh'; renderGrid(); saveSelfie();
+  recompute(); $('#thCount').textContent=S.matches.size+' ảnh'; renderGrid(); showChip(); saveSelfie();
   $('#showMine').classList.toggle('hidden',!S.matches.size);
 };
 function saveSelfie(){
@@ -274,10 +290,11 @@ function restoreSelfie(){
 }
 function showChip(){
   const chip=$('#selChip'); chip.classList.toggle('hidden',!hasFilter()); if(!hasFilter()) return;
-  if(S.person){ const x=S.people.find(x=>x.id===S.person); $('#selChipImg').src=x?fileUrl(x.av):''; $('#selChipTxt').textContent='Đang xem ảnh của người này'; }
-  else { $('#selChipImg').src=S.selfieUrl||''; $('#selChipTxt').textContent='Đang lọc theo selfie của bạn'; }
+  if(S.person){ const x=S.people.find(x=>x.id===S.person); $('#selChipImg').src=x?fileUrl(x.av):''; $('#selChipTxt').textContent='Ảnh của người này'; }
+  else { $('#selChipImg').src=S.selfieUrl||''; $('#selChipTxt').textContent='Ảnh khớp với selfie của bạn'; }
+  $('#peopleBtn').classList.add('accent');
 }
-$('#clearSel').onclick=()=>{ S.person=null; S.selfie=null; S.selfieUrl=null; S.matches.clear(); saveSelfie(); showChip(); renderPeople(); setTab('all'); };
+$('#clearSel').onclick=()=>{ S.person=null; S.selfie=null; S.selfieUrl=null; S.matches.clear(); if(S.sort==='match') S.sort='time'; saveSelfie(); showChip(); renderPeople(); renderGrid(); };
 
 /* ---------------- tìm bằng selfie ---------------- */
 function openFace(){
@@ -285,7 +302,6 @@ function openFace(){
   $('#faceStep1').classList.remove('hidden'); $('#faceStep2').classList.add('hidden');
   loadModels().catch(()=>{});
 }
-$('#findBtnTop').onclick=openFace; $('#findBtnHero').onclick=openFace;
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{ const m=b.closest('.modal'); if(m.id==='adminModal'&&S.busy){ toast('Đang xử lý ảnh, bấm Dừng trước khi đóng.'); return; } m.classList.add('hidden'); });
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m && m.id!=='confirm' && !(m.id==='adminModal'&&S.busy)) m.classList.add('hidden'); }));
 function wireDrop(el,input,handler){
@@ -296,7 +312,7 @@ function wireDrop(el,input,handler){
 }
 wireDrop($('#selfieDrop'),$('#selfieInput'),files=>runSelfie(files[0]));
 $('#retrySelfie').onclick=()=>{ $('#faceStep1').classList.remove('hidden'); $('#faceStep2').classList.add('hidden'); };
-$('#showMine').onclick=()=>{ $('#faceModal').classList.add('hidden'); setTab('mine'); $('#bar').scrollIntoView({behavior:'smooth'}); };
+$('#showMine').onclick=()=>{ $('#faceModal').classList.add('hidden'); renderGrid(); toGrid(); };
 
 async function runSelfie(file){
   $('#faceStep1').classList.add('hidden');
@@ -321,7 +337,7 @@ async function runSelfie(file){
     const fc=document.createElement('canvas'); fc.width=fc.height=200;
     fc.getContext('2d').drawImage(c,Math.max(0,bx.x-pad),Math.max(0,bx.y-pad),bx.width+pad*2,bx.height+pad*2,0,0,200,200);
     S.selfieUrl=fc.toDataURL('image/jpeg',.8); $('#selfiePreview').src=S.selfieUrl;
-    S.selfie=best.descriptor; S.person=null;
+    S.selfie=best.descriptor; S.person=null; S.sort='match';
     msg.textContent='Đang so khớp với '+S.photos.length.toLocaleString('vi-VN')+' ảnh…';
     await new Promise(r=>setTimeout(r,300));
     recompute(); saveSelfie(); showChip(); renderPeople(); s2.classList.add('done');
@@ -352,15 +368,17 @@ async function downloadOne(p){
 }
 $('#zipBtn').onclick=async()=>{
   const list=currentList(); if(!list.length) return;
+  if(list.length>ZIP_MAX){ toast(`Đang có ${list.length.toLocaleString('vi-VN')} ảnh, quá nhiều để tải một lần. Hãy bấm "Tìm người" để lọc ảnh của bạn rồi tải.`,6000); return; }
+  if(!await ask('Tải ảnh về máy?',`Tải ${list.length} ảnh đang hiển thị thành 1 file .zip.`,'Tải về')) return;
   if(!window.JSZip){ toast('Không tải được thư viện nén zip.'); return; }
   const btn=$('#zipBtn'), lbl=btn.querySelector('.lbl'); btn.disabled=true;
   try{
     const zip=new JSZip(); let i=0;
-    for(const p of list){ i++; lbl.textContent=`Đang gom ${i}/${list.length}…`; zip.file(String(i).padStart(3,'0')+'_'+fname(p), await fetchPhoto(p)); }
-    lbl.textContent='Đang nén…';
-    saveBlob(await zip.generateAsync({type:'blob'}), ((S.info.title||'album').replace(/[^\w\-]+/g,'_'))+'_anh-cua-toi.zip');
+    for(const p of list){ i++; lbl.textContent=`${i}/${list.length}`; zip.file(String(i).padStart(3,'0')+'_'+fname(p), await fetchPhoto(p)); }
+    lbl.textContent='Đang nén';
+    saveBlob(await zip.generateAsync({type:'blob'}), ((S.info.title||'album').replace(/[^\w\-]+/g,'_'))+(hasFilter()?'_anh-cua-toi':'')+'.zip');
   }catch(e){ toast('Không tạo được file zip: '+e.message); }
-  btn.disabled=false; lbl.textContent='Tải tất cả (.zip)';
+  btn.disabled=false; lbl.textContent='Tải ảnh';
 };
 
 /* ---------------- xem ảnh toàn màn hình ---------------- */
@@ -476,7 +494,8 @@ wireDrop($('#photoDrop'),$('#photoInput'),files=>ingest(fromFiles(files)));
 $('#folderInput').onchange=e=>{ const f=[...e.target.files]; e.target.value=''; if(f.length) ingest(fromFiles(f)); };
 $('#stopUpload').onclick=()=>{ S.stop=true; $('#upLog').textContent='Đang dừng sau ảnh hiện tại…'; };
 window.addEventListener('beforeunload',e=>{ if(S.busy){ e.preventDefault(); e.returnValue=''; } });
-const fromFiles = files => files.filter(f=>f.type.startsWith('image/')).map(f=>({name:f.name,size:f.size,taken:f.lastModified||0,blob:async()=>f}));
+const fromFiles = files => files.filter(f=>f.type.startsWith('image/')).map(f=>{ const parts=(f.webkitRelativePath||'').split('/');
+  return {name:f.name,size:f.size,taken:f.lastModified||0,cat:parts.length>2?parts[1]:'',blob:async()=>f}; });
 
 $('#driveBtn').onclick=async()=>{
   if(S.busy){ toast('Đang xử lý, chờ xong lượt này.'); return; }
@@ -486,20 +505,20 @@ $('#driveBtn').onclick=async()=>{
   if(!m){ toast('Hãy dán link thư mục Google Drive.'); return; }
   const log=$('#upLog'); const btn=$('#driveBtn'); btn.disabled=true;
   try{
-    const queue=[m[1]], seen=new Set(queue), files=[];
+    const queue=[{id:m[1],cat:''}], seen=new Set([m[1]]), files=[];
     while(queue.length){
-      const folder=queue.shift(); let token=null;
+      const {id:folder,cat}=queue.shift(); let token=null;
       do{
         log.textContent=`Đang đọc danh sách ảnh trên Drive… (${files.length})`;
         const d=await (await api('/api/drive/list?folder='+folder+(token?'&pageToken='+encodeURIComponent(token):''))).json();
-        files.push(...d.files);
-        for(const id of d.folders) if(!seen.has(id)){ seen.add(id); queue.push(id); }
+        for(const f of d.files) files.push({...f,cat});
+        for(const sub of d.folders) if(!seen.has(sub.id)){ seen.add(sub.id); queue.push({id:sub.id,cat:cat||sub.name}); }
         token=d.next;
       }while(token);
     }
     if(!files.length){ log.textContent='Không thấy ảnh nào. Kiểm tra thư mục đã để "Bất kỳ ai có đường liên kết" chưa.'; return; }
     btn.disabled=false;
-    await ingest(files.map(f=>({name:f.name,size:+f.size||0,taken:Date.parse(f.modifiedTime)||0,
+    await ingest(files.map(f=>({name:f.name,size:+f.size||0,taken:Date.parse(f.modifiedTime)||0,cat:f.cat,
       blob:async()=>await (await api('/api/drive/img?id='+f.id)).blob()})));
   }catch(e){ log.textContent='Không đọc được Drive: '+e.message; }
   finally{ btn.disabled=false; }
@@ -539,6 +558,7 @@ async function ingest(sources){
         f:res.map(r=>encodeFace(r.descriptor)),
         b:res.map(r=>{ const x=r.detection.box; return [x.x/det.width,x.y/det.height,x.width/det.width,x.height/det.height].map(v=>Math.round(v*1000)); }),
         g:res.map(()=>0) };
+      if(src.cat) rec.c=src.cat;
       rec._f=rec.f.map(decodeFace);
       S.photos.push(rec); faces+=res.length; pending++;
       if(pending>=SAVE_EVERY){ await saveIndex(); pending=0; }

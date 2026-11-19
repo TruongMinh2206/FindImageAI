@@ -33,100 +33,101 @@ img{max-width:100%}
 :focus-visible{outline:2px solid var(--rose);outline-offset:2px;border-radius:6px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
-/* Thanh trên */
-.top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;padding:10px 24px;min-height:64px;
-  background:rgba(255,250,251,.86);backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:14px;min-width:0}
-.brand img{height:34px;width:auto;max-width:150px;object-fit:contain;display:block}
-.brand .sep{width:1px;height:26px;background:var(--pink-400);opacity:.6}
-.brand .txt{font-family:var(--serif);font-weight:700;font-size:18px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.top .sp{flex:1}
+/* Nút */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:999px;font-weight:600;font-size:14px;
   background:var(--card);border:1px solid var(--line);color:var(--ink);transition:background .2s,border-color .2s,box-shadow .2s,transform .2s}
 .btn:hover{border-color:var(--pink-400);background:var(--pink-50)}
 .btn:active{transform:scale(.98)}
 .btn.primary{background:var(--pink);border-color:var(--pink);color:#4a1d30;box-shadow:var(--shadow-sm)}
-.btn.primary:hover{background:#f5b9cd;border-color:#f5b9cd;box-shadow:0 6px 18px rgba(238,163,187,.5)}
-.btn.dark{background:var(--ink);border-color:var(--ink);color:#fff}
-.btn.dark:hover{background:#43303a;border-color:#43303a}
-.btn.ghost{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.5);color:#fff;backdrop-filter:blur(6px)}
-.btn.ghost:hover{background:rgba(255,255,255,.28);border-color:#fff}
+.btn.primary:hover{background:#f5b9cd;border-color:#f5b9cd}
+.btn.white{background:rgba(255,255,255,.95);border-color:transparent;color:var(--ink);min-height:48px;padding:0 30px;font-size:15px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+.btn.white:hover{background:#fff;transform:translateY(-1px)}
 .btn.danger{color:var(--danger)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .btn svg{width:18px;height:18px;flex:none}
-
-/* Hero */
-.hero-wrap{max-width:1320px;margin:0 auto;padding:20px 24px 0}
-.hero{position:relative;min-height:min(62vh,560px);display:flex;align-items:flex-end;overflow:hidden;border-radius:var(--r-lg);background:var(--pink-200);box-shadow:var(--shadow)}
-.hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center 30%}
-.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(43,26,33,.05) 0%,rgba(43,26,33,.28) 45%,rgba(43,26,33,.78) 100%)}
-.hero .inner{position:relative;z-index:2;width:100%;padding:36px 40px 40px;color:#fff}
-.eyebrow{display:inline-flex;gap:8px;align-items:center;font-size:12px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--pink);
-  background:rgba(43,26,33,.35);backdrop-filter:blur(6px);padding:6px 12px;border-radius:999px}
-.hero h1{font-family:var(--serif);font-size:clamp(32px,5.6vw,68px);font-weight:700;line-height:1.08;margin:14px 0 14px;letter-spacing:-.01em;text-wrap:balance}
-.meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:14px;opacity:.95}
-.meta span{display:inline-flex;gap:6px;align-items:center}
-.meta svg{width:16px;height:16px;opacity:.85}
-.cta{margin-top:24px;display:flex;flex-wrap:wrap;gap:10px}
-.cta .btn{min-height:50px;padding:0 24px;font-size:15px}
-.hero.nocover{background:radial-gradient(900px 420px at 12% 0%,#fff 0%,transparent 60%),linear-gradient(135deg,var(--pink-100),var(--pink) 70%,#f3b4c9)}
-.hero.nocover::after{display:none}
-.hero.nocover .inner{color:var(--ink)}
-.hero.nocover .eyebrow{background:rgba(255,255,255,.7);color:var(--rose)}
-.hero.nocover .btn.ghost{background:rgba(255,255,255,.6);border-color:#fff;color:var(--ink)}
-
-/* Mọi người trong album */
-.people{max-width:1320px;margin:0 auto;padding:36px 24px 6px}
-.sec-head{display:flex;align-items:flex-end;gap:16px;margin-bottom:16px}
-.sec-head h2{font-family:var(--serif);font-size:clamp(22px,2.6vw,30px);font-weight:600;line-height:1.2}
-.sec-head p{color:var(--muted);font-size:14px;margin-top:4px}
-.sec-head .sp{flex:1}
-.linkbtn{color:var(--rose);font-weight:600;font-size:14px;min-height:44px;padding:0 6px;white-space:nowrap}
-.linkbtn:hover{text-decoration:underline}
-.faces{display:flex;gap:14px;overflow-x:auto;padding:6px 2px 16px;scroll-snap-type:x proximity;scrollbar-width:thin;scrollbar-color:var(--pink) transparent}
-.faces.all{flex-wrap:wrap;overflow:visible}
-.face{flex:none;width:88px;display:flex;flex-direction:column;align-items:center;gap:6px;scroll-snap-align:start;border-radius:14px;padding:4px 0}
-.face .av{width:80px;height:80px;border-radius:50%;overflow:hidden;background:var(--pink-100);border:3px solid #fff;box-shadow:0 0 0 1.5px var(--pink-200),var(--shadow-sm);transition:transform .25s,box-shadow .25s}
-.face .av img{width:100%;height:100%;object-fit:cover;display:block}
-.face:hover .av{transform:translateY(-3px);box-shadow:0 0 0 2px var(--pink-400),var(--shadow)}
-.face.on .av{box-shadow:0 0 0 3px var(--rose),var(--shadow)}
-.face small{font-size:12px;color:var(--muted);font-weight:500}
-.face.selfie .av{display:grid;place-items:center;background:var(--pink);color:#4a1d30;border-color:#fff}
-.face.selfie .av svg{width:30px;height:30px}
-.face.selfie small{color:var(--rose);font-weight:600}
-
-/* Thanh công cụ */
-.bar{position:sticky;top:64px;z-index:20;background:rgba(255,250,251,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);margin-top:14px}
-.bar .inner{max-width:1320px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.tabs{display:flex;gap:4px;background:var(--pink-100);padding:4px;border-radius:999px}
-.tab{min-height:38px;padding:0 18px;border-radius:999px;font-size:14px;font-weight:600;color:var(--ink-2);transition:background .2s,color .2s}
-.tab.on{background:#fff;color:var(--ink);box-shadow:var(--shadow-sm)}
-.tab .n{opacity:.6;font-weight:500;margin-left:5px}
-.bar .sp{flex:1}
-.chip{display:flex;align-items:center;gap:8px;padding:4px 6px 4px 4px;border-radius:999px;background:#fff;border:1px solid var(--pink-200);font-size:13px;color:var(--ink-2)}
-.chip img{width:30px;height:30px;border-radius:50%;object-fit:cover}
 .iconbtn{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--pink-100);transition:background .2s}
 .iconbtn:hover{background:var(--pink-200)}
 .iconbtn svg{width:18px;height:18px}
-.iconbtn.sm{width:30px;height:30px}
+.iconbtn.sm{width:32px;height:32px}
 .iconbtn.sm svg{width:14px;height:14px}
+.adminfab{position:fixed;top:14px;right:14px;z-index:40;box-shadow:var(--shadow)}
+
+/* Ảnh bìa phủ kín màn hình */
+.hero{position:relative;height:100vh;height:100svh;min-height:520px;display:flex;align-items:flex-end;justify-content:center;overflow:hidden;background:var(--ink)}
+.hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,10,14,0) 35%,rgba(20,10,14,.55) 70%,rgba(20,10,14,.92) 100%)}
+.hero .inner{position:relative;z-index:2;width:100%;max-width:900px;padding:0 20px 64px;color:#fff;text-align:center;display:flex;flex-direction:column;align-items:center}
+.hlogos{display:flex;align-items:center;justify-content:center;gap:22px;margin-bottom:22px;min-height:20px}
+.hlogos img{height:64px;width:auto;max-width:200px;object-fit:contain;filter:drop-shadow(0 2px 10px rgba(0,0,0,.35))}
+.hlogos .sep{width:1px;height:44px;background:rgba(255,255,255,.55)}
+.hlogos .txt{font-weight:600;letter-spacing:.3em;text-transform:uppercase;font-size:13px;opacity:.95}
+.hero h1{font-size:clamp(26px,4.6vw,48px);font-weight:600;line-height:1.2;text-wrap:balance;text-shadow:0 2px 16px rgba(0,0,0,.35)}
+.hsub{margin-top:10px;font-size:clamp(13px,1.6vw,16px);font-weight:500;letter-spacing:.08em;text-transform:uppercase;opacity:.92}
+.hero .btn.white{margin-top:26px}
+.hero.nocover{background:linear-gradient(160deg,var(--pink-100),var(--pink) 60%,#eea3bb)}
+.hero.nocover::after{display:none}
+.hero.nocover .inner{color:var(--ink)}
+.hero.nocover h1{text-shadow:none}
+.hero.nocover .hlogos img{filter:none}
+.hero.nocover .hlogos .sep{background:var(--pink-400)}
+
+/* Dòng đếm + nhãn thư mục */
+.statsrow{display:flex;justify-content:center;align-items:center;gap:14px;padding:16px 16px;border-bottom:1px solid var(--line);background:#fff}
+.statsrow .pill{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border-radius:999px;font-weight:600;font-size:16px;color:var(--ink)}
+.statsrow .pill.on{background:var(--pink-100);color:var(--rose)}
+.statsrow .pill svg{width:20px;height:20px}
+.statsrow button.pill:hover{background:var(--pink-100)}
+.sticky{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.94);backdrop-filter:blur(12px)}
+.chips{display:flex;gap:10px;overflow-x:auto;padding:12px 12px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chipbtn{flex:none;min-height:44px;padding:0 20px;border-radius:999px;background:#f3eef0;color:var(--ink);font-weight:500;font-size:15px;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;transition:background .2s,color .2s}
+.chipbtn:hover{background:var(--pink-100)}
+.chipbtn.on{background:var(--rose);color:#fff;font-weight:600}
+.filterbar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--line);background:var(--pink-50);font-size:14px;color:var(--ink-2)}
+.filterbar img{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #fff;box-shadow:0 0 0 1.5px var(--pink-400)}
+.filterbar b{color:var(--ink)}
+.filterbar .sp{flex:1}
+
+/* Thanh công cụ nổi ở đáy */
+.dock{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:35;display:flex;align-items:stretch;background:rgba(255,255,255,.96);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:999px;padding:4px 8px;box-shadow:0 8px 30px rgba(60,20,35,.18);max-width:calc(100vw - 16px)}
+.dock{transition:opacity .25s,transform .25s}
+.dock.away{opacity:0;pointer-events:none;transform:translate(-50%,20px)}
+.dock button{display:flex;align-items:center;gap:7px;min-height:48px;padding:0 14px;border-radius:999px;font-size:14px;font-weight:500;color:var(--ink);white-space:nowrap;transition:background .2s,color .2s}
+.dock button:hover{background:var(--pink-100)}
+.dock button.on,.dock button.accent{color:var(--rose);font-weight:600}
+.dock svg{width:19px;height:19px;flex:none}
+.menu{position:fixed;left:50%;bottom:78px;transform:translateX(-50%);z-index:36;background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:6px;min-width:220px}
+.menu button{display:flex;width:100%;align-items:center;min-height:44px;padding:0 14px;border-radius:10px;font-size:14px;text-align:left}
+.menu button:hover{background:var(--pink-100)}
+.menu button.on{color:var(--rose);font-weight:600}
+
+/* Danh sách khuôn mặt */
+.faces{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:12px 8px;margin-top:18px}
+.face{display:flex;flex-direction:column;align-items:center;gap:6px;border-radius:14px;padding:4px 0}
+.face .av{width:76px;height:76px;border-radius:50%;overflow:hidden;background:var(--pink-100);border:3px solid #fff;box-shadow:0 0 0 1.5px var(--pink-200),var(--shadow-sm);transition:transform .25s,box-shadow .25s}
+.face .av img{width:100%;height:100%;object-fit:cover;display:block}
+.face:hover .av{transform:translateY(-2px);box-shadow:0 0 0 2px var(--pink-400),var(--shadow)}
+.face.on .av{box-shadow:0 0 0 3px var(--rose),var(--shadow)}
+.face small{font-size:12px;color:var(--muted);font-weight:500}
 
 /* Lưới ảnh */
-main{max-width:1320px;margin:0 auto;padding:18px 24px 60px}
-.grid{columns:4 260px;column-gap:12px}
-.tile{break-inside:avoid;margin-bottom:12px;position:relative;border-radius:var(--r-sm);overflow:hidden;background:var(--pink-100);cursor:zoom-in;display:block;width:100%;box-shadow:var(--shadow-sm);transition:box-shadow .25s,transform .25s}
-.tile:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
-.tile img{display:block;width:100%;height:auto}
+main{padding:4px 4px 110px;background:#fff}
+.grid{columns:5 260px;column-gap:4px}
+.tile{break-inside:avoid;margin-bottom:4px;position:relative;overflow:hidden;background:var(--pink-100);cursor:zoom-in;display:block;width:100%}
+.tile img{display:block;width:100%;height:auto;transition:transform .4s ease}
+.tile:hover img{transform:scale(1.03)}
+body.squares .grid{columns:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px}
+body.squares .tile{margin:0;aspect-ratio:1}
+body.squares .tile img{height:100%;object-fit:cover;aspect-ratio:auto!important}
 .tile .badge{position:absolute;left:8px;top:8px;background:rgba(255,255,255,.92);font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;color:var(--rose)}
 .tile .dl{position:absolute;right:8px;bottom:8px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.94);color:var(--ink);display:grid;place-items:center;opacity:0;transition:opacity .2s;box-shadow:var(--shadow-sm)}
 .tile:hover .dl,.tile:focus-within .dl{opacity:1}
-@media (hover:none){.tile .dl{opacity:1}}
 .tile .dl svg{width:16px;height:16px}
-.empty{padding:70px 20px;text-align:center;color:var(--muted);background:var(--card);border:1px dashed var(--pink-400);border-radius:var(--r-lg)}
+.empty{margin:20px 12px;padding:70px 20px;text-align:center;color:var(--muted);background:var(--card);border:1px dashed var(--pink-400);border-radius:var(--r-lg)}
 .empty h3{font-family:var(--serif);color:var(--ink);font-size:24px;font-weight:600;margin-bottom:8px}
 .empty .btn{margin-top:18px}
-.note{color:var(--muted);font-size:13px;padding:6px 0}
-footer{border-top:1px solid var(--line);background:var(--pink-100);text-align:center;padding:30px 20px 36px;color:var(--ink-2);font-size:13px}
+.note{color:var(--muted);font-size:13px;padding:6px 12px}
+footer{border-top:1px solid var(--line);background:var(--pink-100);text-align:center;padding:30px 20px 100px;color:var(--ink-2);font-size:13px}
 footer .logos{display:flex;gap:20px;justify-content:center;align-items:center;margin-bottom:12px}
 footer .logos img{height:30px;width:auto}
 footer button{color:var(--muted);text-decoration:underline;min-height:44px;padding:0 6px}
@@ -205,81 +206,46 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
 .confirm .sheet{width:min(400px,100%)}
 
 @media (max-width:640px){
-  .top{padding:8px 14px;min-height:58px}
-  .brand img{height:26px;max-width:104px}
-  .brand{gap:10px}
-  .top .btn .lbl{display:none}
-  .top .btn{padding:0;width:44px}
-  .hero-wrap{padding:12px 12px 0}
-  .hero .inner{padding:24px 20px 26px}
-  .cta .btn{flex:1 1 100%}
-  .people{padding:26px 14px 0}
-  .bar{top:58px}
-  .bar .inner{padding:8px 14px}
-  .chip span{display:none}
-  main{padding:12px 12px 50px}
-  .grid{columns:2 150px;column-gap:8px}
-  .tile{margin-bottom:8px}
-  .face{width:74px}.face .av{width:66px;height:66px}
+  .hero .inner{padding-bottom:48px}
+  .hlogos img{height:46px;max-width:140px}
+  .hlogos{gap:14px}
+  .grid{columns:2 140px}
+  .dock{padding:4px;bottom:10px}
+  .dock button{flex-direction:column;gap:3px;font-size:11px;padding:6px 10px;min-width:60px;justify-content:center}
+  .menu{bottom:84px}
   .lb .stage{padding:0 8px 16px}
   .lb .nav{display:none}
+  .lb .lbtop .lbl{display:none}
   .two,.logo-slots{grid-template-columns:1fr}
   .stats{grid-template-columns:repeat(2,1fr)}
   .tips{grid-template-columns:1fr}
   .sheet{padding:22px 18px}
+  .faces{grid-template-columns:repeat(auto-fill,minmax(72px,1fr))}
+  .face .av{width:64px;height:64px}
 }
 </style>
 </head>
 <body>
 
-<header class="top">
-  <div class="brand" id="brand"><span class="txt" id="brandName">ALBUM</span></div>
-  <div class="sp"></div>
-  <button class="btn hidden" id="adminBtn" aria-label="Quản lý album"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span class="lbl">Quản lý album</span></button>
-  <button class="btn primary" id="findBtnTop" aria-label="Tìm ảnh của tôi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="3"/><path d="M7 18c1-2.5 3-3.5 5-3.5s4 1 5 3.5"/></svg><span class="lbl">Tìm ảnh của tôi</span></button>
-</header>
+<button class="btn adminfab hidden" id="adminBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Quản lý album</button>
 
-<div class="hero-wrap">
 <section class="hero nocover" id="hero">
   <div class="bgimg" id="heroBg"></div>
   <div class="inner">
-    <div class="eyebrow"><span id="eyebrow">Album ảnh sự kiện</span></div>
+    <div class="hlogos" id="brand"></div>
     <h1 id="title">Đang tải album…</h1>
-    <div class="meta">
-      <span id="mDate" class="hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><b></b></span>
-      <span id="mPlace" class="hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg><b></b></span>
-      <span id="mCount"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><b>0 ảnh</b></span>
-    </div>
-    <div class="cta">
-      <button class="btn primary" id="findBtnHero"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="3"/><path d="M7 18c1-2.5 3-3.5 5-3.5s4 1 5 3.5"/></svg>Tìm ảnh bằng selfie</button>
-      <button class="btn ghost" id="viewAllBtn">Xem tất cả ảnh</button>
-    </div>
+    <p class="hsub" id="heroSub"></p>
+    <button class="btn white" id="viewAllBtn">Xem album</button>
   </div>
 </section>
+
+<div class="statsrow" id="bar">
+  <span class="pill on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span id="nAll">0</span></span>
+  <button class="pill hidden" id="peopleStat" aria-label="Xem những người trong album"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="3"/><path d="M7 18c1-2.5 3-3.5 5-3.5s4 1 5 3.5"/></svg><span id="nPeople">0</span></button>
 </div>
-
-<section class="people hidden" id="people">
-  <div class="sec-head">
-    <div>
-      <h2>Bạn có trong album này?</h2>
-      <p id="peopleSub">AI đã nhận diện sẵn những người xuất hiện trong ảnh. Chạm vào khuôn mặt của bạn để xem ảnh của mình.</p>
-    </div>
-    <div class="sp"></div>
-    <button class="linkbtn hidden" id="peopleToggle">Xem tất cả</button>
-  </div>
-  <div class="faces" id="faces"></div>
-</section>
-
-<div class="bar" id="bar">
-  <div class="inner">
-    <div class="tabs" role="tablist">
-      <button class="tab on" data-tab="all" role="tab">Tất cả<span class="n" id="nAll">0</span></button>
-      <button class="tab" data-tab="mine" role="tab">Ảnh của tôi<span class="n" id="nMine">–</span></button>
-    </div>
-    <div class="sp"></div>
-    <div class="chip hidden" id="selChip"><img id="selChipImg" alt=""><span id="selChipTxt">Đang lọc theo khuôn mặt</span><button class="iconbtn sm" id="clearSel" aria-label="Bỏ lọc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
-    <button class="btn dark hidden" id="zipBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg><span class="lbl">Tải tất cả (.zip)</span></button>
-  </div>
+<div class="sticky">
+  <div class="chips hidden" id="chips"></div>
+  <div class="filterbar hidden" id="selChip"><img id="selChipImg" alt=""><span><b id="selChipTxt">Ảnh của bạn</b> · <span id="nMine">0</span> ảnh</span><span class="sp"></span><button class="btn" id="clearSel">Bỏ lọc</button></div>
 </div>
 
 <main>
@@ -293,6 +259,30 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
   <div class="logos" id="footLogos"></div>
   <div><span id="footBrand"></span> · <button id="loginLink">Quản trị</button><button id="logoutLink" class="hidden">Đăng xuất quản trị</button></div>
 </footer>
+
+<nav class="dock away" id="dock" aria-label="Công cụ">
+  <button id="sortBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 4v16M7 20l-3-3M7 4l3 3M17 20V4M17 4l-3 3M17 20l3-3"/></svg><span>Sắp xếp</span></button>
+  <button id="peopleBtn" class="accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="3"/><path d="M7 18c1-2.5 3-3.5 5-3.5s4 1 5 3.5"/></svg><span>Tìm người</span></button>
+  <button id="layoutBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Bố cục</span></button>
+  <button id="shareBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v14"/></svg><span>Chia sẻ</span></button>
+  <button id="zipBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg><span class="lbl">Tải ảnh</span></button>
+</nav>
+<div class="menu hidden" id="sortMenu" role="menu">
+  <button data-sort="time">Thời gian chụp: cũ trước</button>
+  <button data-sort="new">Thời gian chụp: mới trước</button>
+  <button data-sort="name">Tên ảnh</button>
+</div>
+
+<!-- Tìm người -->
+<div class="modal hidden" id="peopleModal" role="dialog" aria-modal="true" aria-labelledby="peopleTitle">
+  <div class="sheet wide">
+    <button class="iconbtn x" data-close aria-label="Đóng"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    <h2 id="peopleTitle">Tìm người</h2>
+    <p class="sub" id="peopleSub">Chạm vào khuôn mặt của bạn để xem ảnh của mình.</p>
+    <div class="row left"><button class="btn primary" id="selfieBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="3"/><path d="M7 18c1-2.5 3-3.5 5-3.5s4 1 5 3.5"/></svg>Tìm bằng ảnh selfie</button></div>
+    <div class="faces" id="faces"></div>
+  </div>
+</div>
 
 <!-- Tìm bằng selfie -->
 <div class="modal hidden" id="faceModal" role="dialog" aria-modal="true" aria-labelledby="faceTitle">
