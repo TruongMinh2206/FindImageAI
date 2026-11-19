@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f8c8d8">
+<link rel="icon" id="favicon" href="data:,">
 <title>Album ảnh sự kiện</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -189,7 +190,7 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
 .stats div{background:var(--pink-100);border-radius:var(--r-sm);padding:12px}
 .stats b{display:block;font-size:20px;font-family:var(--serif)}
 .stats span{font-size:12px;color:var(--ink-2)}
-.logo-slots{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.logo-slots{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px}
 .logo-slot{border:1px dashed var(--pink-400);border-radius:var(--r-sm);padding:12px;text-align:center;background:var(--pink-50)}
 .logo-slot .pv{height:54px;display:grid;place-items:center;margin-bottom:8px;color:var(--muted);font-size:13px}
 .logo-slot .pv img{max-height:54px;max-width:100%;object-fit:contain}
@@ -389,10 +390,11 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
 
     <div class="section">
       <h3>Logo</h3>
-      <p class="sub">Hiện ở góc trên bên trái và cuối trang. Nên dùng file PNG nền trong suốt.</p>
+      <p class="sub">Logo 1 và 2 hiện trên ảnh bìa và cuối trang; nên dùng PNG nền trong suốt. Biểu tượng tab là hình nhỏ trên tab trình duyệt, nên dùng hình vuông; để trống thì lấy Logo 1.</p>
       <div class="logo-slots">
         <div class="logo-slot"><div class="pv" id="logoPv0">Logo 1 (VD: LB Global)</div><div class="row"><label class="btn">Chọn file<input type="file" accept="image/*" data-logo="0" hidden></label><button class="btn danger" data-logo-del="0">Gỡ</button></div></div>
         <div class="logo-slot"><div class="pv" id="logoPv1">Logo 2 (VD: DERMAXILIC)</div><div class="row"><label class="btn">Chọn file<input type="file" accept="image/*" data-logo="1" hidden></label><button class="btn danger" data-logo-del="1">Gỡ</button></div></div>
+        <div class="logo-slot"><div class="pv" id="logoPv2">Biểu tượng tab</div><div class="row"><label class="btn">Chọn file<input type="file" accept="image/*" data-logo="2" hidden></label><button class="btn danger" data-logo-del="2">Gỡ</button></div></div>
       </div>
     </div>
 

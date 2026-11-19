@@ -160,7 +160,8 @@ async function scanFaces(src, deep){
 
 /* ---------------- hiển thị ---------------- */
 function renderBrand(){
-  const i=S.info||{}, logos=(i.logos||[]).filter(Boolean);
+  const i=S.info||{}, logos=(i.logos||[]).slice(0,2).filter(Boolean);
+  setFavicon((i.logos||[])[2] || (i.logos||[])[0] || null);
   const mk=(host,withSep)=>{
     host.textContent='';
     logos.forEach((id,k)=>{
@@ -174,6 +175,18 @@ function renderBrand(){
   mk($('#footLogos'),false);
   $('#footLogos').classList.toggle('hidden',!logos.length);
   $('#footBrand').textContent = i.brand || i.title || 'Album ảnh';
+}
+let favId;
+async function setFavicon(id){
+  if(id===favId) return; favId=id;
+  const link=$('#favicon'); if(!id){ link.href='data:,'; return; }
+  try{
+    const bmp=await createImageBitmap(await (await fetch('/api/file/l/'+id+'.png')).blob());
+    const c=document.createElement('canvas'); c.width=c.height=64;
+    const k=Math.min(64/bmp.width,64/bmp.height), w=bmp.width*k, hh=bmp.height*k;
+    c.getContext('2d').drawImage(bmp,(64-w)/2,(64-hh)/2,w,hh);
+    if(favId===id){ link.type='image/png'; link.href=c.toDataURL('image/png'); }
+  }catch(e){}
 }
 function renderInfo(){
   const i=S.info||{};
@@ -526,17 +539,17 @@ $('#saveInfo').onclick=async()=>{
 };
 
 /* logo */
-const LOGO_HINT=['Logo 1 (VD: LB Global)','Logo 2 (VD: DERMAXILIC)'];
+const LOGO_HINT=['Logo 1 (VD: LB Global)','Logo 2 (VD: DERMAXILIC)','Biểu tượng tab'];
 function renderLogoSlots(){
   const logos=S.info.logos||[];
-  [0,1].forEach(k=>{
+  [0,1,2].forEach(k=>{
     const pv=$('#logoPv'+k); pv.textContent='';
     if(logos[k]){ const img=document.createElement('img'); img.src=fileUrl('l/'+logos[k]+'.png'); img.alt=''; pv.appendChild(img); }
     else pv.textContent=LOGO_HINT[k];
   });
 }
 async function setLogo(k, id){
-  const logos=[...(S.info.logos||[null,null])]; while(logos.length<2) logos.push(null);
+  const logos=[...(S.info.logos||[])]; while(logos.length<3) logos.push(null);
   const old=logos[k]; logos[k]=id;
   const prev=S.info; S.info={...S.info,logos};
   try{ await saveIndex(); }catch(e){ S.info=prev; throw e; }
