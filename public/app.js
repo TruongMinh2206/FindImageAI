@@ -766,6 +766,32 @@ $('#rescanBtn').onclick=async()=>{
   S.busy=false; $('#stopRescan').classList.add('hidden'); $('#rescanBtn').disabled=false; recompute(); renderAll();
 };
 
+$('#purgeBtn').onclick=async()=>{
+  if(S.busy){ toast('Đang xử lý, chờ xong lượt này.'); return; }
+  const log=$('#purgeLog');
+  try{ await loadIndex(); }catch(e){ log.textContent='Lỗi: '+e.message; return; }
+  const n=S.photos.length;
+  if(!await ask('Xoá hết ảnh trong album?',`Toàn bộ ${n.toLocaleString('vi-VN')} ảnh cùng dữ liệu khuôn mặt sẽ bị xoá vĩnh viễn, không khôi phục được. Logo được giữ lại.`,'Xoá hết')) return;
+  if(!await ask('Bạn chắc chắn chứ?','Khách đang xem album sẽ không còn thấy ảnh nào. Bấm "Xoá vĩnh viễn" để tiếp tục.','Xoá vĩnh viễn')) return;
+  S.busy=true; $('#purgeBtn').disabled=true;
+  try{
+    log.textContent='Đang xoá danh sách ảnh…';
+    S.photos=[]; S.people=[]; S.person=null; S.cat=null; S.matches.clear();
+    S.info={logos:S.info.logos||[], brand:S.info.brand||''};
+    await saveIndex(); renderAll(); showChip();
+    let total=0;
+    for(;;){
+      const d=await (await api('/api/purge',{method:'POST'})).json();
+      total+=d.deleted; log.textContent=`Đang xoá file ảnh… ${total.toLocaleString('vi-VN')} file`;
+      if(d.done) break;
+    }
+    log.textContent=`Đã xoá xong ${n.toLocaleString('vi-VN')} ảnh. Album đang trống, hãy đặt tên sự kiện mới và thêm ảnh.`;
+    $('#fTitle').value=''; $('#fDate').value=''; $('#fPlace').value=''; $('#fEyebrow').value=''; $('#upLog').textContent=''; $('#upBar').style.width='0';
+    toast('Đã xoá hết ảnh');
+  }catch(e){ log.textContent='Bị lỗi giữa chừng: '+e.message+'. Bấm lại nút để xoá tiếp.'; }
+  S.busy=false; $('#purgeBtn').disabled=false; renderAll();
+};
+
 /* ---------------- khởi động ---------------- */
 (async()=>{
   restoreSelfie();

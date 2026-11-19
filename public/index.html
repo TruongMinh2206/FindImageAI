@@ -431,6 +431,12 @@ footer button{color:var(--muted);text-decoration:underline;min-height:44px;paddi
       <div class="row left"><button class="btn" id="clusterBtn">Gom nhóm lại</button><button class="btn" id="rescanBtn">Quét lại khuôn mặt cho ảnh đã có</button><button class="btn danger hidden" id="stopRescan">Dừng</button></div>
       <div class="log" id="clusterLog" aria-live="polite"></div>
     </div>
+  
+    <div class="section">
+      <h3 style="color:var(--danger)">Tạo album mới</h3>
+      <p class="sub">Xoá toàn bộ ảnh, khuôn mặt và nhóm người đang có để bắt đầu album cho sự kiện khác. Logo và mật khẩu được giữ lại. Ảnh đã xoá không khôi phục được.</p>
+      <div class="row left"><button class="btn danger" id="purgeBtn">Xoá hết ảnh, tạo album mới</button><span class="log" id="purgeLog" style="margin:0" aria-live="polite"></span></div>
+    </div>
   </div>
 </div>
 

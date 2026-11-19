@@ -71,6 +71,20 @@ export default {
       }
     }
 
+    // Xoá toàn bộ ảnh (giữ logo). Mỗi lần gọi xoá 1 đợt; trang web gọi lặp đến khi done = true.
+    if (path === '/api/purge' && method === 'POST') {
+      if (!isAdmin(req, env)) return json({ error: 'Sai mật khẩu' }, 401);
+      for (const prefix of ['p/', 't/', 'f/']) {
+        const l = await env.BUCKET.list({ prefix, limit: 500 });
+        const keys = l.objects.map(o => o.key);
+        if (keys.length) {
+          await env.BUCKET.delete(keys);
+          return json({ deleted: keys.length, done: false });
+        }
+      }
+      return json({ deleted: 0, done: true });
+    }
+
     // File ảnh: p/<id>.jpg (ảnh lớn), t/<id>.jpg (ảnh thu nhỏ)
     if (path.startsWith('/api/file/')) {
       const key = decodeURIComponent(path.slice('/api/file/'.length));
