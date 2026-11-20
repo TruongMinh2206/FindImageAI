@@ -1,19 +1,17 @@
 // FindImageAI – logic trang album (chạy trên Cloudflare Worker + R2)
+import { clusterFaces as runCluster } from './cluster.js';
 const $ = s => document.querySelector(s);
 const ICON_DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>';
 const ICON_SELFIE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="3"/><path d="M7 18c1-2.5 3-3.5 5-3.5s4 1 5 3.5"/></svg>';
 const PAGE = 120;            // số ảnh hiển thị mỗi lần cuộn
 const Q_SCALE = 300;         // lượng tử hoá vector khuôn mặt về Int8
 const SAVE_EVERY = 10;       // lưu chỉ mục sau mỗi N ảnh khi thêm ảnh
-const CLUSTER_T = 0.46;      // ngưỡng gom 1 khuôn mặt vào nhóm
-const MERGE_T = 0.36;        // ngưỡng gộp 2 nhóm
 const MIN_PHOTOS = 2;        // người xuất hiện ít nhất N ảnh mới hiện ra
 const MAX_PEOPLE = 400;
 const ZIP_MAX = 500;
 const BIG = 3200, TILE = 1280, TSTEP = 1000;   // quét chia ô để bắt mặt nhỏ
-const MIN_FACE = 26, MAX_FACES = 80, SEED_FACE = 44;   // cỡ mặt (px) tối thiểu để lấy / để làm hạt giống nhóm
-const MAX_SELFIES = 3;
-const SOLO_FACE = 70;         // cỡ mặt (px) để người chỉ xuất hiện 1 ảnh vẫn được hiện           // số ảnh tối đa cho 1 lần tải zip
+const MIN_FACE = 26, MAX_FACES = 80;   // cỡ mặt (px) tối thiểu để lấy, số mặt tối đa mỗi ảnh
+const MAX_SELFIES = 3;           // số ảnh tối đa cho 1 lần tải zip
 
 /* ---------------- state ---------------- */
 const S = {
@@ -199,14 +197,29 @@ function renderInfo(){
   $('#heroBg').style.backgroundImage = cover ? `url("${fileUrl('p/'+cover+'.jpg')}")` : '';
   renderBrand();
 }
-function personCounts(){
-  const m=new Map();
-  for(const p of S.photos){ if(!p.g) continue; for(const id of new Set(p.g)) if(id) m.set(id,(m.get(id)||0)+1); }
+// Mỗi người được lọc giống hệt tìm bằng selfie: lấy mặt mẫu rõ nhất của họ rồi so khớp với toàn album
+function personDescs(x){
+  const out=[]; for(const [pid,i] of (x.r||[])){ const p=S.photos.find(p=>p.id===pid); if(p?._f?.[i]) out.push(p._f[i]); }
+  return out;
+}
+function matchPhotos(descs, th){
+  const m=new Map(); if(!descs?.length) return m;
+  for(const p of S.photos){
+    if(!p._f?.length) continue;
+    let best=9; for(const f of p._f) for(const sv of descs){ const d=dist(sv,f); if(d<best) best=d; }
+    if(best<=th) m.set(p.id,best);
+  }
   return m;
+}
+let countCache={key:'',m:new Map()};
+function personCounts(){
+  const key=S.people.length+'|'+S.photos.length+'|'+S.threshold+'|'+(S.people[0]?.av||'');
+  if(countCache.key!==key){ const m=new Map(); for(const x of S.people) m.set(x.id,matchPhotos(personDescs(x),S.threshold).size); countCache={key,m}; }
+  return countCache.m;
 }
 function renderPeople(){
   const counts=personCounts();
-  const list=S.people.filter(x=>(counts.get(x.id)||0)>=1);
+  const list=S.people.filter(x=>(counts.get(x.id)||0)>=MIN_PHOTOS).sort((a,b)=>counts.get(b.id)-counts.get(a.id));
   $('#peopleStat').classList.toggle('hidden',!list.length); $('#nPeople').textContent=list.length;
   $('#peopleSub').textContent=list.length
     ? `AI đã nhận diện sẵn ${list.length} người trong album. Chạm vào khuôn mặt của bạn để xem ảnh của mình, hoặc tìm bằng ảnh selfie.`
@@ -227,10 +240,13 @@ onAct('people',openPeople); $('#peopleStat').onclick=openPeople;
 $('#selfieBtn').onclick=()=>{ $('#peopleModal').classList.add('hidden'); openFace(); };
 function toGrid(){ $('#bar').scrollIntoView({behavior:'smooth'}); }
 function pickPerson(id){
-  S.person=id; S.selfie=null; S.selfieUrl=null; S.matches.clear(); saveSelfie();
+  const x=S.people.find(x=>x.id===id), descs=x?personDescs(x):[];
+  if(!descs.length){ toast('Không đọc được khuôn mặt mẫu của người này.'); return; }
+  S.person=id; S.selfie=descs; S.selfieUrl=fileUrl(x.av); S.sort='match'; S.addMode=false;
+  recompute(); saveSelfie();
   $('#peopleModal').classList.add('hidden'); showChip(); renderGrid(); toGrid();
 }
-const hasFilter = () => !!(S.person || S.selfie?.length);
+const hasFilter = () => !!S.selfie?.length;
 function categories(){
   const m=new Map(); for(const p of S.photos) if(p.c) m.set(p.c,(m.get(p.c)||0)+1);
   return [...m.keys()].sort((a,b)=>a.localeCompare(b,'vi',{numeric:true}));
@@ -246,12 +262,11 @@ function renderChips(){
 function currentList(){
   let list=S.photos;
   if(S.cat) list=list.filter(p=>p.c===S.cat);
-  if(S.person) list=list.filter(p=>p.g?.includes(S.person));
-  else if(S.selfie?.length) list=list.filter(p=>S.matches.has(p.id));
+  if(S.selfie?.length) list=list.filter(p=>S.matches.has(p.id));
   list=[...list];
   if(S.sort==='new') list.sort((a,b)=>byTime(b,a));
   else if(S.sort==='name') list.sort((a,b)=>(a.name||'').localeCompare(b.name||'','vi',{numeric:true}));
-  else if(S.selfie && !S.person && S.sort==='match') list.sort((a,b)=>S.matches.get(a.id)-S.matches.get(b.id));
+  else if(S.selfie?.length && S.sort==='match') list.sort((a,b)=>S.matches.get(a.id)-S.matches.get(b.id));
   else list.sort(byTime);
   return list;
 }
@@ -261,10 +276,9 @@ function tile(p, list, idx){
   img.src=fileUrl('t/'+p.id+'.jpg');
   if(p.w&&p.h){ img.width=p.w; img.height=p.h; img.style.aspectRatio=p.w+'/'+p.h; }
   d.appendChild(img);
-  if(S.selfie && !S.person && S.matches.has(p.id)){
+  if(S.selfie?.length && S.matches.has(p.id)){
     const b=document.createElement('span'); b.className='badge';
-    const dd=S.matches.get(p.id); b.textContent= dd<0.40?'Rất giống':dd<0.48?'Giống':'Có thể là bạn';
-    if(dd>=0.6) b.title='AI đoán theo nhóm khuôn mặt đã gom';
+    const dd=S.matches.get(p.id); b.textContent= dd<0.40?'Rất giống':dd<0.48?'Giống':'Có thể giống';
     d.appendChild(b);
   }
   const dl=document.createElement('button'); dl.className='dl'; dl.innerHTML=ICON_DL; dl.setAttribute('aria-label','Tải ảnh');
@@ -330,23 +344,7 @@ onAct('share',async()=>{
 });
 
 /* ---------------- so khớp selfie ---------------- */
-function recompute(){
-  S.matches.clear(); if(!S.selfie?.length) return;
-  const strong=new Map(), total=new Map();           // theo nhóm người: số mặt khớp chắc / tổng số mặt
-  for(const p of S.photos){
-    if(!p._f?.length) continue;
-    let best=9;
-    p._f.forEach((f,i)=>{
-      let d=9; for(const sv of S.selfie){ const x=dist(sv,f); if(x<d) d=x; }
-      if(d<best) best=d;
-      const g=p.g?.[i]; if(g){ total.set(g,(total.get(g)||0)+1); if(d<=Math.min(S.threshold,0.45)) strong.set(g,(strong.get(g)||0)+1); }
-    });
-    if(best<=S.threshold) S.matches.set(p.id,best);
-  }
-  // Nếu selfie khớp chắc với một nhóm người đã gom, lấy thêm các ảnh còn lại của nhóm đó (góc nghiêng, mặt nhỏ…)
-  const mine=new Set(); for(const [g,n] of strong) if(n>=2 && n>=total.get(g)*0.3) mine.add(g);
-  if(mine.size) for(const p of S.photos) if(!S.matches.has(p.id) && p.g?.some(g=>mine.has(g))) S.matches.set(p.id,0.6);
-}
+function recompute(){ S.matches=matchPhotos(S.selfie,S.threshold); }
 const thName = v => v<0.47?'Chặt':v>0.56?'Rộng':'Cân bằng';
 $('#th').oninput=e=>{
   S.threshold=+e.target.value; $('#thLabel').textContent=thName(S.threshold);
@@ -368,7 +366,7 @@ function restoreSelfie(){
 }
 function showChip(){
   const chip=$('#selChip'); chip.classList.toggle('hidden',!hasFilter()); if(!hasFilter()) return;
-  if(S.person){ const x=S.people.find(x=>x.id===S.person); $('#selChipImg').src=x?fileUrl(x.av):''; $('#selChipTxt').textContent='Ảnh của người này'; }
+  if(S.person){ const x=S.people.find(x=>x.id===S.person); $('#selChipImg').src=x?fileUrl(x.av):''; $('#selChipTxt').textContent='Ảnh khớp với khuôn mặt đã chọn'; }
   else { $('#selChipImg').src=S.selfieUrl||''; $('#selChipTxt').textContent='Ảnh khớp với selfie của bạn'; }
 }
 $('#clearSel').onclick=()=>{ S.person=null; S.selfie=null; S.selfieUrl=null; S.matches.clear(); if(S.sort==='match') S.sort='time'; saveSelfie(); showChip(); renderPeople(); renderGrid(); };
@@ -669,49 +667,20 @@ async function clusterFaces(onMsg){
   const faces=[];
   for(const p of S.photos){
     p.g=new Array(p._f.length).fill(0);
-    p._f.forEach((d,i)=>{ const b=p.b?.[i]; faces.push({p,i,d,a:b?b[2]*b[3]:0,q:p.q?.[i]??99}); });
+    p._f.forEach((d,i)=>faces.push({p,i,d,q:p.q?.[i]??0,pid:p.id}));     // ảnh quét kiểu cũ (không rõ cỡ mặt) không dùng để lập nhóm
   }
-  faces.sort((x,y)=>(y.q-x.q)||(y.a-x.a));           // mặt to, rõ làm hạt giống trước
-  const C=[];                                        // {sum,c,n,m:[face]}
-  const add=(cl,f)=>{ cl.n++; for(let k=0;k<128;k++){ cl.sum[k]+=f.d[k]; cl.c[k]=cl.sum[k]/cl.n; } cl.m.push(f); };
-  for(let n=0;n<faces.length;n++){
-    const f=faces[n]; let best=null, bd=CLUSTER_T;
-    for(const cl of C){ const d=dist(f.d,cl.c); if(d<bd){ bd=d; best=cl; } }
-    if(!best){
-      if(f.q<SEED_FACE) continue;                    // mặt quá nhỏ: không lập nhóm mới, lát nữa gán sau
-      best={sum:new Float32Array(128),c:new Float32Array(128),n:0,m:[]}; C.push(best);
-    }
-    else if(f.q<SEED_FACE){ if(bd<0.42) best.m.push(f); continue; }   // mặt nhỏ: chỉ gán khi rất giống, không làm lệch tâm nhóm
-    add(best,f);
-    if(n%400===0){ onMsg?.(`Đang gom nhóm khuôn mặt… ${n}/${faces.length}`); await tick(); }
-  }
-  for(let pass=0;pass<3;pass++){                     // gộp các nhóm quá giống nhau
-    let merged=false;
-    for(let i=0;i<C.length;i++){
-      if(!C[i]) continue;
-      for(let j=i+1;j<C.length;j++){
-        if(!C[j]) continue;
-        if(dist(C[i].c,C[j].c)<MERGE_T){ for(const f of C[j].m) add(C[i],f); C[j]=null; merged=true; }
-      }
-      if(i%50===0) await tick();
-    }
-    if(!merged) break;
-  }
-  const groups=C.filter(Boolean).map(cl=>({cl,photos:new Set(cl.m.map(f=>f.p.id)).size}))
-    .filter(x=>x.photos>=MIN_PHOTOS || x.cl.m.some(f=>f.q>=SOLO_FACE))   // người chỉ có 1 ảnh vẫn hiện nếu mặt to, rõ
-    .sort((a,b)=>b.photos-a.photos).slice(0,MAX_PEOPLE);
+  const {labels,reps,tops}=await runCluster(faces,{minPhotos:MIN_PHOTOS,maxPeople:MAX_PEOPLE,
+    onProgress:f=>onMsg?.(`Đang gom nhóm khuôn mặt… ${Math.round(f*100)}%`)});
+  labels.forEach((l,k)=>{ if(l) faces[k].p.g[faces[k].i]=l; });
   const oldAv=new Set(S.people.map(x=>x.av));
   const people=[];
-  for(let k=0;k<groups.length;k++){
-    const {cl}=groups[k], id=k+1;
-    for(const f of cl.m) f.p.g[f.i]=id;
-    const rep=cl.m.reduce((a,b)=>(b.q*1e6+b.a)>(a.q*1e6+a.a)?b:a);
-    const av=`f/${rep.p.id}-${rep.i}.jpg`;
+  for(let k=0;k<reps.length;k++){
+    const rep=faces[reps[k]], av=`f/${rep.p.id}-${rep.i}.jpg`;
     if(!oldAv.has(av)){
-      onMsg?.(`Đang tạo ảnh đại diện ${k+1}/${groups.length}…`);
+      onMsg?.(`Đang tạo ảnh đại diện ${k+1}/${reps.length}…`);
       try{ await makeAvatar(rep,av); }catch(e){ console.warn('avatar',e); }
     }
-    people.push({id,av});
+    people.push({id:k+1,av,r:tops[k].map(n=>[faces[n].p.id,faces[n].i])});
   }
   const keep=new Set(people.map(x=>x.av));
   S.people=people;
