@@ -12,7 +12,8 @@ const MAX_PEOPLE = 400;
 const ZIP_MAX = 500;
 const BIG = 3200, TILE = 1280, TSTEP = 1000;   // quét chia ô để bắt mặt nhỏ
 const MIN_FACE = 26, MAX_FACES = 80, SEED_FACE = 44;   // cỡ mặt (px) tối thiểu để lấy / để làm hạt giống nhóm
-const MAX_SELFIES = 3;           // số ảnh tối đa cho 1 lần tải zip
+const MAX_SELFIES = 3;
+const SOLO_FACE = 70;         // cỡ mặt (px) để người chỉ xuất hiện 1 ảnh vẫn được hiện           // số ảnh tối đa cho 1 lần tải zip
 
 /* ---------------- state ---------------- */
 const S = {
@@ -696,7 +697,8 @@ async function clusterFaces(onMsg){
     if(!merged) break;
   }
   const groups=C.filter(Boolean).map(cl=>({cl,photos:new Set(cl.m.map(f=>f.p.id)).size}))
-    .filter(x=>x.photos>=MIN_PHOTOS).sort((a,b)=>b.photos-a.photos).slice(0,MAX_PEOPLE);
+    .filter(x=>x.photos>=MIN_PHOTOS || x.cl.m.some(f=>f.q>=SOLO_FACE))   // người chỉ có 1 ảnh vẫn hiện nếu mặt to, rõ
+    .sort((a,b)=>b.photos-a.photos).slice(0,MAX_PEOPLE);
   const oldAv=new Set(S.people.map(x=>x.av));
   const people=[];
   for(let k=0;k<groups.length;k++){
