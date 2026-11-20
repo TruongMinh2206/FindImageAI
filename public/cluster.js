@@ -7,11 +7,14 @@
 
 export const CORE_Q = 56;      // cỡ mặt (px) tối thiểu để tham gia lập nhóm
 export const SMALL_Q = 40;     // mặt nhỏ hơn mức này không được gán vào người nào
-const T0 = 0.42;               // ngưỡng nối 2 mặt
-const T_MIN = 0.30;
-const LOOSE = 0.47;            // khoảng cách trung bình trong nhóm vượt mức này = nhóm lỏng, phải tách
-const OUTLIER = 0.52;          // xa tâm nhóm hơn mức này thì loại khỏi nhóm
-const SMALL_T = 0.36;          // mặt nhỏ phải gần tâm nhóm hơn mức này
+// Các ngưỡng dưới đây tính theo khoảng cách giữa 2 vector SFace đã chuẩn hoá:
+// cùng một người thường < 0.9, khác người thường > 1.2 (OpenCV coi < 1.128 là cùng người).
+const T0 = 0.85;               // ngưỡng nối 2 mặt
+const T_STEP = 0.05, T_MIN = 0.65;
+const LOOSE = 0.98;            // khoảng cách trung bình trong nhóm vượt mức này = nhóm lỏng, phải tách
+const OUTLIER = 1.0;           // xa tâm nhóm hơn mức này thì loại khỏi nhóm
+const SMALL_T = 0.75;          // mặt nhỏ phải gần tâm nhóm hơn mức này
+const SAME_REP = 0.85;         // 2 nhóm có mặt mẫu gần hơn mức này là cùng một người
 
 function d2(a, b, limit) {
   let s = 0;
@@ -78,7 +81,7 @@ export async function clusterFaces(F, { minPhotos = 2, maxPeople = 400, onProgre
     const groups = await whispers(idx, F, T, idx === core ? onProgress : null);
     for (const g of groups) {
       if (g.length < 2) continue;
-      if (g.length >= 6 && T - 0.04 >= T_MIN && meanPairwise(g, F) > LOOSE) queue.push({ idx: g, T: T - 0.04 });   // nhóm lỏng: tách lại
+      if (g.length >= 6 && T - T_STEP >= T_MIN && meanPairwise(g, F) > LOOSE) queue.push({ idx: g, T: T - T_STEP });   // nhóm lỏng: tách lại
       else done.push(g);
     }
     await tick();
@@ -95,7 +98,7 @@ export async function clusterFaces(F, { minPhotos = 2, maxPeople = 400, onProgre
     const f = F[i]; if (f.q >= CORE_Q || f.q < SMALL_Q) continue;
     let best = null, bd = SMALL_T, second = 9;
     for (const cl of clusters) { const d = dist(f.d, cl.c); if (d < bd) { second = bd; bd = d; best = cl; } else if (d < second) second = d; }
-    if (best && second - bd > 0.05) (best.extra ||= []).push(i);
+    if (best && second - bd > 0.15) (best.extra ||= []).push(i);
   }
   for (const cl of clusters) {
     cl.all = cl.m.concat(cl.extra || []);
@@ -103,11 +106,11 @@ export async function clusterFaces(F, { minPhotos = 2, maxPeople = 400, onProgre
   }
   clusters = clusters.filter(c => c.photos >= minPhotos).sort((a, b) => b.photos - a.photos).slice(0, maxPeople);
   // Mỗi người: chọn tối đa 3 mặt mẫu to, rõ, gần tâm nhóm nhất (mặt đầu tiên làm ảnh đại diện)
-  const score = (i, cl) => Math.min(F[i].q, 200) - 300 * dist(F[i].d, cl.c);
+  const score = (i, cl) => Math.min(F[i].q, 200) - 150 * dist(F[i].d, cl.c);
   for (const cl of clusters) cl.tops = [...cl.m].sort((a, b) => score(b, cl) - score(a, cl)).slice(0, 3);
   // Hai nhóm có mặt mẫu quá giống nhau là cùng một người bị tách: chỉ giữ nhóm lớn hơn
   const kept = [];
-  for (const cl of clusters) if (!kept.some(k => dist(F[k.tops[0]].d, F[cl.tops[0]].d) < 0.40)) kept.push(cl);
+  for (const cl of clusters) if (!kept.some(k => dist(F[k.tops[0]].d, F[cl.tops[0]].d) < SAME_REP)) kept.push(cl);
   const labels = new Int32Array(F.length), reps = [], tops = [];
   kept.forEach((cl, k) => { for (const i of cl.all) labels[i] = k + 1; reps.push(cl.tops[0]); tops.push(cl.tops); });
   return { labels, reps, tops };
