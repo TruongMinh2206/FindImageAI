@@ -11,7 +11,8 @@ const MAX_PEOPLE = 400;
 const ZIP_MAX = 500;
 const BIG = 3200, TILE = 1280, TSTEP = 1000;   // quét chia ô để bắt mặt nhỏ
 const MIN_FACE = 26, MAX_FACES = 80;   // cỡ mặt (px) tối thiểu để lấy, số mặt tối đa mỗi ảnh
-const MAX_SELFIES = 3;           // số ảnh tối đa cho 1 lần tải zip
+const MAX_SELFIES = 3;
+const STRICT_T = 0.40;        // bấm vào một người: chỉ lấy ảnh "Rất giống"           // số ảnh tối đa cho 1 lần tải zip
 
 /* ---------------- state ---------------- */
 const S = {
@@ -213,8 +214,8 @@ function matchPhotos(descs, th){
 }
 let countCache={key:'',m:new Map()};
 function personCounts(){
-  const key=S.people.length+'|'+S.photos.length+'|'+S.threshold+'|'+(S.people[0]?.av||'');
-  if(countCache.key!==key){ const m=new Map(); for(const x of S.people) m.set(x.id,matchPhotos(personDescs(x),S.threshold).size); countCache={key,m}; }
+  const key=S.people.length+'|'+S.photos.length+'|'+(S.people[0]?.av||'');
+  if(countCache.key!==key){ const m=new Map(); for(const x of S.people) m.set(x.id,matchPhotos(personDescs(x),STRICT_T).size); countCache={key,m}; }
   return countCache.m;
 }
 function renderPeople(){
@@ -242,7 +243,7 @@ function toGrid(){ $('#bar').scrollIntoView({behavior:'smooth'}); }
 function pickPerson(id){
   const x=S.people.find(x=>x.id===id), descs=x?personDescs(x):[];
   if(!descs.length){ toast('Không đọc được khuôn mặt mẫu của người này.'); return; }
-  S.person=id; S.selfie=descs; S.selfieUrl=fileUrl(x.av); S.sort='match'; S.addMode=false;
+  S.person=id; S.strict=true; S.selfie=descs; S.selfieUrl=fileUrl(x.av); S.sort='match'; S.addMode=false;
   recompute(); saveSelfie();
   $('#peopleModal').classList.add('hidden'); showChip(); renderGrid(); toGrid();
 }
@@ -344,7 +345,7 @@ onAct('share',async()=>{
 });
 
 /* ---------------- so khớp selfie ---------------- */
-function recompute(){ S.matches=matchPhotos(S.selfie,S.threshold); }
+function recompute(){ S.matches=matchPhotos(S.selfie,S.strict?STRICT_T:S.threshold); }
 const thName = v => v<0.47?'Chặt':v>0.56?'Rộng':'Cân bằng';
 $('#th').oninput=e=>{
   S.threshold=+e.target.value; $('#thLabel').textContent=thName(S.threshold);
@@ -353,7 +354,7 @@ $('#th').oninput=e=>{
 };
 function saveSelfie(){
   try{
-    if(S.selfie?.length) localStorage.setItem('album.selfie',JSON.stringify({ds:S.selfie.map(d=>Array.from(d)),t:S.threshold,u:S.selfieUrl}));
+    if(S.selfie?.length) localStorage.setItem('album.selfie',JSON.stringify({ds:S.selfie.map(d=>Array.from(d)),t:S.threshold,u:S.selfieUrl,s:S.strict?1:0}));
     else localStorage.removeItem('album.selfie');
   }catch(e){}
 }
@@ -361,15 +362,15 @@ function restoreSelfie(){
   try{
     const v=JSON.parse(localStorage.getItem('album.selfie')||'null');
     const ds=(v?.ds||(v?.d?[v.d]:[])).filter(d=>d?.length===128);
-    if(ds.length){ S.selfie=ds.map(d=>Float32Array.from(d)); S.threshold=v.t||0.52; S.selfieUrl=v.u||null; $('#th').value=S.threshold; }
+    if(ds.length){ S.selfie=ds.map(d=>Float32Array.from(d)); S.threshold=v.t||0.52; S.selfieUrl=v.u||null; S.strict=!!v.s; $('#th').value=S.threshold; }
   }catch(e){}
 }
 function showChip(){
   const chip=$('#selChip'); chip.classList.toggle('hidden',!hasFilter()); if(!hasFilter()) return;
-  if(S.person){ const x=S.people.find(x=>x.id===S.person); $('#selChipImg').src=x?fileUrl(x.av):''; $('#selChipTxt').textContent='Ảnh khớp với khuôn mặt đã chọn'; }
+  if(S.strict){ $('#selChipImg').src=S.selfieUrl||''; $('#selChipTxt').textContent='Ảnh rất giống khuôn mặt đã chọn'; }
   else { $('#selChipImg').src=S.selfieUrl||''; $('#selChipTxt').textContent='Ảnh khớp với selfie của bạn'; }
 }
-$('#clearSel').onclick=()=>{ S.person=null; S.selfie=null; S.selfieUrl=null; S.matches.clear(); if(S.sort==='match') S.sort='time'; saveSelfie(); showChip(); renderPeople(); renderGrid(); };
+$('#clearSel').onclick=()=>{ S.strict=false; S.person=null; S.selfie=null; S.selfieUrl=null; S.matches.clear(); if(S.sort==='match') S.sort='time'; saveSelfie(); showChip(); renderPeople(); renderGrid(); };
 
 /* ---------------- tìm bằng selfie ---------------- */
 function openFace(){
@@ -415,7 +416,7 @@ async function runSelfie(file){
     fc.getContext('2d').drawImage(c,Math.max(0,bx.x-pad),Math.max(0,bx.y-pad),bx.width+pad*2,bx.height+pad*2,0,0,200,200);
     S.selfieUrl=fc.toDataURL('image/jpeg',.8); $('#selfiePreview').src=S.selfieUrl;
     if(S.addMode && S.selfie?.length && S.selfie.length<MAX_SELFIES) S.selfie=[...S.selfie,best.descriptor]; else S.selfie=[best.descriptor];
-    S.addMode=false; S.person=null; S.sort='match';
+    S.addMode=false; S.person=null; S.strict=false; S.sort='match';
     msg.textContent='Đang so khớp với '+S.photos.length.toLocaleString('vi-VN')+' ảnh…';
     await new Promise(r=>setTimeout(r,300));
     recompute(); saveSelfie(); showChip(); renderPeople(); s2.classList.add('done');
