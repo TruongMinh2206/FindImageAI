@@ -152,20 +152,30 @@ export default {
         const id = url.searchParams.get('id') || '';
         if (!DRIVE_ID_RE.test(id)) return json({ error: 'Mã file không hợp lệ' }, 400);
         const isImg = r => r.ok && (r.headers.get('content-type') || '').startsWith('image/');
-        // Ưu tiên bản Google đã thu nhỏ (nhẹ hơn ảnh gốc nhiều lần); không được thì lấy ảnh gốc
         const thumbBase = env.DRIVE_THUMB_BASE || 'https://drive.google.com/thumbnail';
-        const wantOrig = url.searchParams.get('orig') === '1' && key;
-        let r = wantOrig ? null : await fetch(`${thumbBase}?id=${id}&sz=w3200`).catch(() => null);
-        let src = 'thumb';
-        if (!r || !isImg(r)) {
-          if (!key) return json({ error: 'Không lấy được ảnh từ Drive' }, 502);
-          r = await fetch(`${apiBase}/files/${id}?alt=media&supportsAllDrives=true&key=${key}`);
-          src = 'original';
-          if (!isImg(r)) return json({ error: 'Không lấy được ảnh từ Drive (' + r.status + ')' }, 502);
+        const sources = {
+          // bản Google đã thu nhỏ (nhẹ hơn ảnh gốc nhiều lần)
+          thumb: () => fetch(`${thumbBase}?id=${id}&sz=w3200`),
+          // ảnh gốc
+          original: () => key ? fetch(`${apiBase}/files/${id}?alt=media&supportsAllDrives=true&key=${key}`) : null,
+        };
+        const wantOrig = url.searchParams.get('orig') === '1';
+        const order = wantOrig ? ['original', 'thumb'] : ['thumb', 'original'];
+        let detail = '';
+        for (const name of order) {             // cách đầu không được thì tự thử cách còn lại
+          let r = null;
+          try { r = await sources[name](); } catch (e) { detail += `${name}: ${e.message}; `; continue; }
+          if (!r) continue;
+          if (isImg(r)) {
+            return new Response(r.body, {
+              headers: { 'content-type': r.headers.get('content-type'), 'cache-control': 'no-store', 'x-drive-source': name },
+            });
+          }
+          let msg = '';
+          try { const t = await r.text(); msg = (t.match(/"message":\s*"([^"]+)"/) || [])[1] || ''; } catch (e) {}
+          detail += `${name}: ${r.status} ${msg}`.trim() + '; ';
         }
-        return new Response(r.body, {
-          headers: { 'content-type': r.headers.get('content-type'), 'cache-control': 'no-store', 'x-drive-source': src },
-        });
+        return json({ error: 'Không lấy được ảnh từ Drive (' + detail.trim() + ')' }, 502);
       }
     }
 

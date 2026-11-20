@@ -644,12 +644,13 @@ async function ingest(sources){
       if(pending>=SAVE_EVERY){ await saveIndex(); pending=0; }
     }catch(e){
       console.error(src.name,e); fails++; lastErr=e.message;
+      if(fails>=15 && fails===done+1){ lastErr+=' — dừng vì ảnh nào cũng lỗi'; done++; break; }   // lỗi hàng loạt: dừng sớm, khỏi chạy vô ích
       if(e.status===401){ toast('Phiên quản trị hết hạn, đăng nhập lại.'); break; }
     }
     done++;
     const eta=Math.round((Date.now()-t0)/done*(todo.length-done)/1000);
     bar.style.width=(done/todo.length*100)+'%';
-    log.textContent=`Đã xử lý ${done}/${todo.length} ảnh · ${faces} khuôn mặt${fails?` · ${fails} lỗi`:''}${done<todo.length?` · còn khoảng ${eta>90?Math.round(eta/60)+' phút':eta+' giây'}`:''}`;
+    log.textContent=`Đã xử lý ${done}/${todo.length} ảnh · ${faces} khuôn mặt${fails?` · ${fails} lỗi (${lastErr})`:''}${done<todo.length?` · còn khoảng ${eta>90?Math.round(eta/60)+' phút':eta+' giây'}`:''}`;
     if(done%25===0){ S.photos.sort(byTime); renderAll(); }
   }
   try{ if(pending) await saveIndex(); }catch(e){ toast('Lưu danh sách ảnh bị lỗi: '+e.message); }
